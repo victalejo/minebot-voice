@@ -4,8 +4,9 @@ import { stopCurrentBehavior, markTeleported } from './behaviors.js'
 import { markPlayerAttacker } from './reflexes.js'
 
 // If a player is within this many blocks when the bot takes damage, treat them
-// as the attacker. 6 blocks covers melee + small reach.
-const ATTACKER_DETECT_RADIUS = 6
+// as the attacker. 10 blocks covers melee, bow shots from close range, and
+// position lag between client and server.
+const ATTACKER_DETECT_RADIUS = 10
 
 export interface BotConfig {
   host: string
@@ -128,9 +129,11 @@ function attachLifecycleLogs(currentBot: Bot): void {
 
   let lastHp = 20
   currentBot.on('health', () => {
-    if (currentBot.health < lastHp && currentBot.entity) {
+    const hp = currentBot.health
+    if (hp < lastHp && currentBot.entity) {
       // Bot just took damage. Mineflayer doesn't expose the attacker directly,
-      // so blame the nearest player within attack range — good enough for PvP.
+      // so blame the nearest player — good enough for PvP. Larger radius (10
+      // blocks) catches sword reach + a bit of slack.
       const myPos = currentBot.entity.position
       let nearestName: string | null = null
       let nearestDist = Infinity
@@ -143,12 +146,14 @@ function attachLifecycleLogs(currentBot: Bot): void {
           nearestName = player.username
         }
       }
-      if (nearestName) {
-        console.log(`[Bot] Took damage; nearest player ${nearestName} (${nearestDist.toFixed(1)}b) marked as attacker`)
-        markPlayerAttacker(nearestName)
+      console.log(`[Bot] HP ${lastHp.toFixed(1)} → ${hp.toFixed(1)}; ${nearestName ? `attacker=${nearestName} (${nearestDist.toFixed(1)}b)` : 'no nearby player'}`)
+      if (nearestName) markPlayerAttacker(nearestName)
+      // Wake the bot if it was sleeping so it can react.
+      if (currentBot.isSleeping) {
+        currentBot.wake().catch(() => { /* already awake */ })
       }
     }
-    lastHp = currentBot.health
+    lastHp = hp
   })
 
   // Server-forced position change (admin /tp, /spreadplayers, plugin TP, etc).

@@ -66,9 +66,18 @@ function decideState(
     return { state: 'idle', reason: 'recently teleported, staying put' }
   }
 
-  // Night + safe — try to sleep
+  // Night + safe — try to sleep. Skip if any non-self player is within 12
+  // blocks: sleeping disables physics, so an attacker can one-shot the bot
+  // before it can react.
   if (r.isNight && !r.hostileCount && bot.isSleeping === false) {
-    return { state: 'sleeping', reason: 'night + safe' }
+    const myPos = bot.entity.position
+    const playerNear = Object.values(bot.players).some((p) => {
+      const e = p?.entity
+      return e && e !== bot.entity && myPos.distanceTo(e.position) <= 12
+    })
+    if (!playerNear) {
+      return { state: 'sleeping', reason: 'night + safe' }
+    }
   }
 
   // Have a base and far from it (>80 blocks) — go home
