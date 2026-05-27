@@ -47,14 +47,35 @@ export interface ReflexReading {
   hasShelter: boolean      // proxy: under a solid block within 5 above
 }
 
+// Players who have damaged the bot recently are considered hostile until this
+// timeout elapses. Tracked by lowercase username.
+const PLAYER_HOSTILE_WINDOW_MS = 15_000
+const recentAttackers = new Map<string, number>()
+
+export function markPlayerAttacker(username: string): void {
+  recentAttackers.set(username.toLowerCase(), Date.now())
+}
+
+function isRecentAttacker(name: string | undefined): boolean {
+  if (!name) return false
+  const at = recentAttackers.get(name.toLowerCase())
+  if (!at) return false
+  if (Date.now() - at > PLAYER_HOSTILE_WINDOW_MS) {
+    recentAttackers.delete(name.toLowerCase())
+    return false
+  }
+  return true
+}
+
 const NIGHT_START = 13000
 const NIGHT_END = 23000
 const HOSTILE_SCAN_RADIUS = 16
 const SHELTER_SCAN_HEIGHT = 5
 
 function isHostile(entity: Entity): boolean {
-  // mineflayer exposes type as 'mob' for most living non-player entities; the
-  // name discriminator is what actually identifies hostility.
+  // A player who hit the bot recently is treated as hostile so the combat
+  // behavior fights back instead of standing still.
+  if (entity.type === 'player' && isRecentAttacker(entity.username)) return true
   if (entity.type !== 'mob') return false
   if (!entity.name) return false
   return HOSTILE_MOBS.has(entity.name)

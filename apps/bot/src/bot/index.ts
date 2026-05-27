@@ -1,6 +1,11 @@
 import mineflayer, { type Bot } from 'mineflayer'
 import { loadPlugins } from './plugins.js'
 import { stopCurrentBehavior, markTeleported } from './behaviors.js'
+import { markPlayerAttacker } from './reflexes.js'
+
+// If a player is within this many blocks when the bot takes damage, treat them
+// as the attacker. 6 blocks covers melee + small reach.
+const ATTACKER_DETECT_RADIUS = 6
 
 export interface BotConfig {
   host: string
@@ -119,6 +124,31 @@ function attachLifecycleLogs(currentBot: Bot): void {
 
   currentBot.on('death', () => {
     console.log('[Bot] Died, will respawn')
+  })
+
+  let lastHp = 20
+  currentBot.on('health', () => {
+    if (currentBot.health < lastHp && currentBot.entity) {
+      // Bot just took damage. Mineflayer doesn't expose the attacker directly,
+      // so blame the nearest player within attack range — good enough for PvP.
+      const myPos = currentBot.entity.position
+      let nearestName: string | null = null
+      let nearestDist = Infinity
+      for (const player of Object.values(currentBot.players)) {
+        const entity = player?.entity
+        if (!entity || entity === currentBot.entity) continue
+        const dist = myPos.distanceTo(entity.position)
+        if (dist < nearestDist && dist <= ATTACKER_DETECT_RADIUS) {
+          nearestDist = dist
+          nearestName = player.username
+        }
+      }
+      if (nearestName) {
+        console.log(`[Bot] Took damage; nearest player ${nearestName} (${nearestDist.toFixed(1)}b) marked as attacker`)
+        markPlayerAttacker(nearestName)
+      }
+    }
+    lastHp = currentBot.health
   })
 
   // Server-forced position change (admin /tp, /spreadplayers, plugin TP, etc).
