@@ -8,6 +8,7 @@ import * as schema from '../db/schema.js'
 import { setLocation, getLocation, deleteLocation } from '../db/locations.js'
 import { placeBlockAt, buildShelter } from './builder.js'
 import { setUserPathfinder } from './behaviors.js'
+import { getCurrentPosition } from './index.js'
 
 const { goals } = pathfinderPkg
 const { GoalNear, GoalFollow, GoalY } = goals
@@ -207,12 +208,18 @@ export async function executeAction(
         log('info', 'rememberHere ignored: db not available')
         break
       }
-      const pos = bot.entity.position
+      const pos = getCurrentPosition(bot)
+      if (!pos) {
+        bot.chat('No sé bien dónde estoy ahora, espera un momento e inténtalo de nuevo.')
+        log('info', 'rememberHere skipped: no valid position available')
+        break
+      }
       const x = Math.floor(pos.x)
       const y = Math.floor(pos.y)
       const z = Math.floor(pos.z)
       setLocation(ctx.db, { name: action.name, kind: action.kind, x, y, z })
       log('action', `Saved "${action.name}" (${action.kind}) at (${x}, ${y}, ${z})`)
+      bot.chat(`Listo, marqué "${action.name}" aquí (${x}, ${y}, ${z}).`)
       break
     }
 

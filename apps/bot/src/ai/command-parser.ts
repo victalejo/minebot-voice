@@ -80,7 +80,9 @@ Available actions (respond with exactly these JSON shapes):
 9. stop: { "action": "stop" }
 10. say: { "action": "say", "message": string }
 11. sleep: { "action": "sleep" }
-12. setGoal: { "action": "setGoal", "resource": "wood"|"food"|"stone", "count": number, "description": string }
+12. setGoal: { "action": "setGoal", "resource": "wood"|"food"|"stone"|"armor"|"iron", "count": number, "description": string }
+    - armor: hunts zombies/skeletons for armor piece drops.
+    - iron: mines iron_ore / deepslate_iron_ore.
     - Use for long-running autonomous tasks ("consigue madera", "junta comida")
     - The bot will pursue this goal in the background while still surviving (eating, fleeing, etc).
     - description is a short Spanish phrase shown to the user.
@@ -127,7 +129,9 @@ Do NOT check memory for simple, self-contained commands like "mina 10 piedra" or
 - If you CANNOT fulfill a request (missing materials, impossible task), use a "say" action to explain why. NEVER respond with plain text.
 
 ## Goals vs immediate actions
-- "Consigue/junta/recolecta N madera|comida|piedra" → use setGoal with resource and count. The bot pursues it autonomously (will eat, defend itself, sleep while gathering).
+- "Consigue/junta/recolecta N madera|comida|piedra|armadura|hierro" → use setGoal with resource and count. The bot pursues it autonomously (will eat, defend itself, sleep while gathering).
+- "Consigue armadura" / "busca armadura" → setGoal(armor, 2-4). The bot will hunt zombies/skeletons.
+- "Consigue hierro" / "mina hierro" → setGoal(iron, 8-16).
 - "Mina 5 piedra aquí" (small, immediate) → use mine.
 - "Para/cancela/olvídalo" → use cancelGoal (then optionally a say to confirm).
 - A setGoal does NOT need to be combined with mine/attack — the goal handles its own gathering loop.

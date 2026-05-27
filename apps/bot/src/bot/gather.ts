@@ -15,6 +15,7 @@ interface GatherResult {
 
 const SCAN_RADIUS = 64
 const FOOD_MOB_SCAN_RADIUS = 32
+const HOSTILE_MOB_SCAN_RADIUS = 40
 
 // ── Resource → block/entity catalog ───────────────────────────────────────────
 
@@ -24,8 +25,25 @@ const WOOD_BLOCKS = [
 ]
 
 const STONE_BLOCKS = ['stone', 'cobblestone', 'deepslate', 'cobbled_deepslate']
+const IRON_BLOCKS = ['iron_ore', 'deepslate_iron_ore']
 
 const FOOD_MOBS = ['cow', 'pig', 'chicken', 'sheep', 'rabbit']
+
+// Hostile mobs that sometimes drop armor pieces, swords, or bows when killed.
+const ARMOR_DROPPING_MOBS = ['zombie', 'skeleton', 'husk', 'stray', 'drowned', 'zombie_villager']
+
+// Item-name matchers for inventory checks.
+const ARMOR_ITEMS = new Set([
+  'leather_helmet', 'leather_chestplate', 'leather_leggings', 'leather_boots',
+  'chainmail_helmet', 'chainmail_chestplate', 'chainmail_leggings', 'chainmail_boots',
+  'iron_helmet', 'iron_chestplate', 'iron_leggings', 'iron_boots',
+  'golden_helmet', 'golden_chestplate', 'golden_leggings', 'golden_boots',
+  'diamond_helmet', 'diamond_chestplate', 'diamond_leggings', 'diamond_boots',
+  'netherite_helmet', 'netherite_chestplate', 'netherite_leggings', 'netherite_boots',
+  'turtle_helmet',
+])
+
+const IRON_ITEMS = new Set(['iron_ingot', 'raw_iron', 'iron_ore', 'deepslate_iron_ore'])
 
 // Foods that count toward a food-gather goal (carried in inventory).
 const FOOD_ITEMS = new Set([
@@ -55,6 +73,8 @@ function inventoryHasResource(bot: Bot, resource: GatherResource): number {
     case 'wood': return countInInventory(bot, (n) => WOOD_DROPS.has(n))
     case 'stone': return countInInventory(bot, (n) => STONE_DROPS.has(n))
     case 'food': return countInInventory(bot, (n) => FOOD_ITEMS.has(n))
+    case 'armor': return countInInventory(bot, (n) => ARMOR_ITEMS.has(n))
+    case 'iron': return countInInventory(bot, (n) => IRON_ITEMS.has(n))
   }
 }
 
@@ -75,8 +95,12 @@ export async function gatherResourceBehavior(
     case 'wood':
     case 'stone':
       return gatherBlock(bot, resource, targetTotal, signal, log)
+    case 'iron':
+      return gatherBlock(bot, 'iron', targetTotal, signal, log)
     case 'food':
       return gatherFood(bot, targetTotal, signal, log)
+    case 'armor':
+      return gatherArmor(bot, targetTotal, signal, log)
   }
 }
 
@@ -84,12 +108,15 @@ export async function gatherResourceBehavior(
 
 async function gatherBlock(
   bot: Bot,
-  resource: 'wood' | 'stone',
+  resource: 'wood' | 'stone' | 'iron',
   targetTotal: number,
   signal: AbortSignal,
   log: ActivityLogger,
 ): Promise<GatherResult> {
-  const blockNames = resource === 'wood' ? WOOD_BLOCKS : STONE_BLOCKS
+  const blockNames =
+    resource === 'wood' ? WOOD_BLOCKS :
+    resource === 'stone' ? STONE_BLOCKS :
+    IRON_BLOCKS
   const blockIds = blockNames
     .map((n) => bot.registry.blocksByName[n]?.id)
     .filter((id): id is number => id != null)
@@ -103,6 +130,13 @@ async function gatherBlock(
 
   while (inventoryHasResource(bot, resource) < targetTotal) {
     if (signal.aborted) return { ok: false, error: 'aborted' }
+
+    const p = bot.entity?.position
+    if (!p || !Number.isFinite(p.x)) {
+      // Position is NaN — wait for chunks to load instead of looping pathfinder.
+      await new Promise((r) => setTimeout(r, 2000))
+      continue
+    }
 
     const positions = bot.findBlocks({
       matching: blockIds,
@@ -143,13 +177,91 @@ async function gatherBlock(
 
 async function wanderOnce(bot: Bot, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return
+  const p = bot.entity?.position
+  // If position is NaN (chunks not loaded yet on this fabric server), bail out
+  // — pathfinder.goto with NaN goal would loop allocating astar nodes.
+  if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) {
+    await new Promise((r) => setTimeout(r, 1000))
+    return
+  }
   const dx = (Math.random() - 0.5) * 30
   const dz = (Math.random() - 0.5) * 30
-  const tx = Math.floor(bot.entity.position.x + dx)
-  const tz = Math.floor(bot.entity.position.z + dz)
+  const tx = Math.floor(p.x + dx)
+  const tz = Math.floor(p.z + dz)
   try {
-    await bot.pathfinder.goto(new GoalNear(tx, bot.entity.position.y, tz, 3))
+    await bot.pathfinder.goto(new GoalNear(tx, Math.floor(p.y), tz, 3))
   } catch { /* noop */ }
+}
+
+// ── Armor: hunt hostile mobs that drop armor pieces ──────────────────────────
+
+async function gatherArmor(
+  bot: Bot,
+  targetTotal: number,
+  signal: AbortSignal,
+  log: ActivityLogger,
+): Promise<GatherResult> {
+  let emptyScans = 0
+
+  while (inventoryHasResource(bot, 'armor') < targetTotal) {
+    if (signal.aborted) return { ok: false, error: 'aborted' }
+
+    const p = bot.entity?.position
+    if (!p || !Number.isFinite(p.x)) {
+      await new Promise((r) => setTimeout(r, 1500))
+      continue
+    }
+
+    const target = findHostileMob(bot)
+    if (!target) {
+      emptyScans++
+      if (emptyScans >= 4) {
+        return { ok: false, error: `no armor-dropping mobs in ${HOSTILE_MOB_SCAN_RADIUS}b radius` }
+      }
+      await wanderOnce(bot, signal)
+      continue
+    }
+    emptyScans = 0
+
+    try {
+      const tp = target.position
+      if (Number.isFinite(tp.x)) {
+        await bot.pathfinder.goto(new GoalNear(tp.x, tp.y, tp.z, 2))
+      }
+      if (signal.aborted) return { ok: false, error: 'aborted' }
+      ;(bot as any).pvp.attack(target)
+      await waitForMobDeath(bot, target, signal, 20_000)
+      // Give a moment for drops to land and pickup to happen.
+      await new Promise((r) => setTimeout(r, 1500))
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      log('info', `Skip armor mob: ${msg}`)
+    }
+  }
+
+  log('info', `Gathered armor — have ${inventoryHasResource(bot, 'armor')}`)
+  return { ok: true, error: '' }
+}
+
+function findHostileMob(bot: Bot): Entity | null {
+  let nearest: Entity | null = null
+  let nearestDist = Infinity
+  const myPos = bot.entity?.position
+  if (!myPos || !Number.isFinite(myPos.x)) return null
+  for (const entity of Object.values(bot.entities)) {
+    if (entity === bot.entity) continue
+    if (entity.type !== 'mob') continue
+    if (!entity.name || !ARMOR_DROPPING_MOBS.includes(entity.name)) continue
+    const tp = entity.position
+    if (!tp || !Number.isFinite(tp.x)) continue
+    const dist = myPos.distanceTo(tp)
+    if (dist > HOSTILE_MOB_SCAN_RADIUS) continue
+    if (dist < nearestDist) {
+      nearest = entity
+      nearestDist = dist
+    }
+  }
+  return nearest
 }
 
 // ── Mob-based gathering (food) ────────────────────────────────────────────────

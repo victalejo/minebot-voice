@@ -121,6 +121,22 @@ function attachLifecycleLogs(currentBot: Bot): void {
     if (authPassword) {
       setTimeout(() => sendAuthPassword(currentBot, authPassword), AUTH_LOGIN_DELAY_MS)
     }
+    // Track last finite position; if positions go NaN for too long, reconnect
+    // so the server resyncs us.
+    const posWatch = setInterval(() => {
+      const p = currentBot.entity?.position
+      if (p && Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z)) {
+        lastValidPos = { x: p.x, y: p.y, z: p.z }
+        lastValidAt = Date.now()
+      } else if (lastValidAt && Date.now() - lastValidAt > 15000) {
+        console.log('[Bot] Position has been NaN for >15s — forcing reconnect to resync.')
+        lastValidAt = 0  // reset so we don't keep triggering
+        try { currentBot.quit() } catch { /* swallow */ }
+      }
+    }, 500)
+    const cleanup = () => clearInterval(posWatch)
+    currentBot.once('end', cleanup)
+    currentBot.once('death', cleanup)
   })
 
   currentBot.on('death', () => {
@@ -243,6 +259,24 @@ function posStr(currentBot: Bot): string {
   const p = currentBot.entity?.position
   if (!p) return 'unknown'
   return `(${p.x.toFixed(1)},${p.y.toFixed(1)},${p.z.toFixed(1)})`
+}
+
+// Track the last position that was finite so other modules can fall back
+// to it when prismarine-physics corrupts bot.entity.position into NaN.
+let lastValidPos: { x: number; y: number; z: number } | null = null
+let lastValidAt = 0
+
+export function getLastValidPosition(): { x: number; y: number; z: number } | null {
+  if (!lastValidPos) return null
+  return { ...lastValidPos }
+}
+
+export function getCurrentPosition(currentBot: Bot): { x: number; y: number; z: number } | null {
+  const p = currentBot.entity?.position
+  if (p && Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z)) {
+    return { x: p.x, y: p.y, z: p.z }
+  }
+  return lastValidPos ? { ...lastValidPos } : null
 }
 
 function sendAuthPassword(currentBot: Bot, password: string): void {

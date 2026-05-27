@@ -17,7 +17,7 @@ export type BotState =
   | 'idle'
 
 // Kinds of resources the bot can gather as a goal.
-export type GatherResource = 'wood' | 'food' | 'stone'
+export type GatherResource = 'wood' | 'food' | 'stone' | 'armor' | 'iron'
 
 // Goal lifecycle status (mirrors DB column).
 export type GoalStatus = 'pending' | 'active' | 'completed' | 'failed' | 'cancelled'

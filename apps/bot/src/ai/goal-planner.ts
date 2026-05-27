@@ -71,24 +71,26 @@ const SYSTEM_PROMPT = `Eres el cerebro estratégico de MineBot, un bot autónomo
 
 Tienes acceso a una memoria persistente. Úsala para recordar preferencias del jugador, ubicaciones importantes, o patrones que aprendiste. Si una meta reciente falló (ej. "no wood found"), no la repitas — busca otra.
 
-## Reglas de planificación
-- Eres un jugador real: necesitas madera primero (para mesas y herramientas), luego comida, luego piedra para mejores herramientas.
-- Sin madera (oak_log/spruce_log/etc): SIEMPRE prioriza wood.
-- Con madera pero sin comida y food<16: prioriza food.
-- Con madera y comida pero sin piedra (cobblestone): prioriza stone.
-- Con todo lo básico: descansa (devuelve goal=null para que el bot quede idle).
-- No propongas metas si está oscureciendo y aún hay tiempo de buscar refugio (el bot duerme solo si tiene cama).
+## Reglas de planificación (prioridad descendente)
+1. Sin madera (oak_log/spruce_log/etc) → wood.
+2. Con madera pero sin comida y food<16 → food.
+3. Con madera y comida pero sin piedra (cobblestone) → stone.
+4. Sin armadura puesta NI piezas de armadura en inventario → armor (matar zombis/esqueletos para drops).
+5. Con armadura de cuero o sin botas de hierro+ y tiene piedra → iron (minar mineral de hierro para mejor armadura/herramientas).
+6. Con todo lo básico cubierto → descansa (goal=null).
 
 ## Cantidades razonables
-- wood: 8-32 (rangos típicos)
+- wood: 8-32
 - food: 4-12
 - stone: 16-32
+- armor: 1-4 (cada zombi/esqueleto tiene baja probabilidad de drop, así que conseguir 4 es ambicioso pero útil)
+- iron: 6-16
 
 ## Output
 Devuelve UN objeto JSON RAW (sin markdown, sin texto adicional):
 {
   "reasoning": "breve frase en español explicando por qué",
-  "goal": { "resource": "wood"|"food"|"stone", "count": number, "description": "frase corta en español" }
+  "goal": { "resource": "wood"|"food"|"stone"|"armor"|"iron", "count": number, "description": "frase corta en español" }
 }
 
 O si NADA tiene sentido ahora mismo:
