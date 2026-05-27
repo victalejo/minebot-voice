@@ -7,6 +7,7 @@ import type { GoalManager } from './goals.js'
 import * as schema from '../db/schema.js'
 import { setLocation, getLocation, deleteLocation } from '../db/locations.js'
 import { placeBlockAt, buildShelter } from './builder.js'
+import { setUserPathfinder } from './behaviors.js'
 
 const { goals } = pathfinderPkg
 const { GoalNear, GoalFollow, GoalY } = goals
@@ -101,8 +102,8 @@ export async function executeAction(
       }
       const goal = new GoalFollow(entity, 3)
       bot.pathfinder.setGoal(goal, true)
-      const goalSet = (bot.pathfinder as any).goal != null
-      console.log(`[Follow] setGoal called, pathfinder.goal set=${goalSet}`)
+      setUserPathfinder(true)
+      console.log(`[Follow] setGoal called for ${action.player}, isMoving=${bot.pathfinder.isMoving()}`)
       log('info', `Now following ${action.player}`)
       break
     }

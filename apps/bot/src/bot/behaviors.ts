@@ -21,6 +21,19 @@ export type BehaviorId =
 let currentBehavior: BehaviorId = null
 let currentAbort: AbortController | null = null
 
+// True while a user-initiated pathfinder goal (follow/moveTo/...) is alive.
+// State machine reads this to keep the bot in executing_command instead of
+// transitioning to sleeping/returning_home/idle which would cancel the goal.
+let userPathfinderActive = false
+
+export function setUserPathfinder(active: boolean): void {
+  userPathfinderActive = active
+}
+
+export function hasUserPathfinder(): boolean {
+  return userPathfinderActive
+}
+
 export function getCurrentBehavior(): BehaviorId {
   return currentBehavior
 }
@@ -34,6 +47,7 @@ export function stopCurrentBehavior(bot: Bot): void {
   try { bot.pathfinder?.stop() } catch { /* noop */ }
   try { (bot as any).pvp?.stop() } catch { /* noop */ }
   currentBehavior = null
+  userPathfinderActive = false
 }
 
 function startBehavior(id: BehaviorId, bot: Bot): AbortController {

@@ -9,6 +9,7 @@ import {
   goHomeBehavior,
   stopCurrentBehavior,
   getCurrentBehavior,
+  hasUserPathfinder,
   type BehaviorId,
 } from './behaviors.js'
 import type { ActivityLogger } from './actions.js'
@@ -54,7 +55,7 @@ function decideState(
 
   // User-initiated pathfinder goal (follow/moveTo) still active? Keep it.
   // Without this, sleeping/returning_home would stomp on the user's intent.
-  if ((bot as any).pathfinder?.goal) {
+  if (hasUserPathfinder()) {
     return { state: 'executing_command', reason: 'user goal active' }
   }
 
