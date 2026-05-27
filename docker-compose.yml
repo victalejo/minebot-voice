@@ -27,6 +27,7 @@ services:
       DB_PATH: "/app/data/minebot.sqlite"
       MEMORY_DIR: "/app/data/memories"
       NODE_ENV: "production"
+      NODE_OPTIONS: "--max-old-space-size=3072"
     expose:
       - 3001
     volumes:
