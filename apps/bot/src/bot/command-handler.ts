@@ -4,7 +4,7 @@ import type { Bot } from 'mineflayer'
 import type { ServerToClientEvents, ClientToServerEvents, ActivityEvent } from '@minebot/shared'
 import { parseCommand } from '../ai/command-parser.js'
 import { executeActions, type ActivityLogger } from './actions.js'
-import { stopCurrentBehavior } from './behaviors.js'
+import { stopCurrentBehavior, getCurrentBehavior, hasUserPathfinder } from './behaviors.js'
 import { getDb } from '../db/index.js'
 import { saveConversation, getRecentHistory, formatHistoryForPrompt } from '../db/history.js'
 import { formatLocationsForPrompt } from '../db/locations.js'
@@ -64,6 +64,7 @@ export async function handleNaturalCommand(
     speaker: speakerName,
     source,
     botName: process.env.BOT_NAME || bot.username,
+    currentActivity: describeActivity(bot, deps.getGoalManager()),
   }
 
   try {
@@ -108,4 +109,30 @@ export async function handleNaturalCommand(
 
 function makeActivity(type: ActivityEvent['type'], message: string): ActivityEvent {
   return { id: randomUUID(), timestamp: Date.now(), type, message }
+}
+
+// Human-readable description of what the bot is doing RIGHT NOW. Fed into the
+// AI prompt so questions like "que haces?" get an accurate answer (instead of
+// the AI hallucinating activities).
+function describeActivity(bot: Bot, goalManager: GoalManager | null): string {
+  const goal = goalManager?.getActive()
+  if (goal) {
+    const desc = goal.description || `${goal.kind} ${goal.resource ?? ''} ${goal.targetCount ?? ''}`.trim()
+    return `recolectando un objetivo: ${desc}`
+  }
+
+  const behavior = getCurrentBehavior()
+  if (behavior === 'flee') return 'huyendo de un enemigo'
+  if (behavior === 'combat') return 'peleando contra un enemigo'
+  if (behavior === 'sleep') return 'durmiendo en una cama'
+  if (behavior === 'go_home') return 'regresando a la base'
+
+  if (hasUserPathfinder()) {
+    const pf = (bot.pathfinder as any)?.goal
+    const targetEntity = pf?.entity
+    if (targetEntity?.username) return `siguiendo a ${targetEntity.username}`
+    return 'caminando hacia un destino'
+  }
+
+  return 'sin nada que hacer en este momento, esperando órdenes'
 }

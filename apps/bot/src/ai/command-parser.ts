@@ -55,6 +55,9 @@ export interface BotContext {
   source?: 'chat' | 'dashboard'
   // The bot's own in-game name, so the AI can recognize when it's being addressed.
   botName?: string
+  // Human-readable description of what the bot is currently doing — used to
+  // answer "que haces?" accurately instead of making something up.
+  currentActivity?: string
 }
 
 export const ACTION_SCHEMA = `
@@ -120,6 +123,7 @@ Do NOT check memory for simple, self-contained commands like "mina 10 piedra" or
 - You can chain many actions. Be thorough - complete the full request in one response.
 - If a command is ambiguous, make reasonable assumptions and execute.
 - If the user says something casual ("hola", "que haces"), respond with a say action.
+- When asked what you are doing ("que haces?", "que estas haciendo?"), use the "Currently:" field from Bot state VERBATIM in your reply — never invent or paraphrase an activity that isn't in that field.
 - If you CANNOT fulfill a request (missing materials, impossible task), use a "say" action to explain why. NEVER respond with plain text.
 
 ## Goals vs immediate actions
@@ -189,7 +193,8 @@ export function buildPrompt(command: string, ctx: BotContext, historyContext?: s
 - Health: ${ctx.health}/20, Food: ${ctx.food}/20
 - Position: x=${ctx.position.x}, y=${ctx.position.y}, z=${ctx.position.z}
 - Time: ${timeStr}${ctx.isRaining ? ', lloviendo' : ''}
-- Inventory: ${inventoryStr}`
+- Inventory: ${inventoryStr}
+- Currently: ${ctx.currentActivity ?? 'sin actividad conocida'}`
 
   if (ctx.speaker) {
     prompt += `\n\n## Speaker\nMessage from player "${ctx.speaker}". Your in-game name is "${ctx.botName ?? 'bot'}". When the speaker says "ven aquí", "sígueme", "ven conmigo", or similar, the target player is "${ctx.speaker}" — do not ask for their name.`
