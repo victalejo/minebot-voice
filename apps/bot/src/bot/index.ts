@@ -1,5 +1,6 @@
 import mineflayer, { type Bot } from 'mineflayer'
 import { loadPlugins } from './plugins.js'
+import { stopCurrentBehavior, markTeleported } from './behaviors.js'
 
 export interface BotConfig {
   host: string
@@ -118,6 +119,15 @@ function attachLifecycleLogs(currentBot: Bot): void {
 
   currentBot.on('death', () => {
     console.log('[Bot] Died, will respawn')
+  })
+
+  // Server-forced position change (admin /tp, /spreadplayers, plugin TP, etc).
+  // Without this, kevin keeps the pre-TP pathfinder goal and immediately walks
+  // back toward wherever he was going before.
+  currentBot.on('forcedMove', () => {
+    console.log(`[Bot] forcedMove (teleport) → clearing pathfinder/behavior at ${posStr(currentBot)}`)
+    stopCurrentBehavior(currentBot)
+    markTeleported()
   })
 
   currentBot.on('kicked', (reason) => {

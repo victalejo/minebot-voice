@@ -34,6 +34,20 @@ export function hasUserPathfinder(): boolean {
   return userPathfinderActive
 }
 
+// Timestamp of the last server-forced teleport. The tick layer freezes
+// autonomous behaviors (returning_home, gathering) for a window after this so
+// the bot doesn't immediately walk away from where an admin /tp'd it.
+const TP_FREEZE_MS = 45_000
+let lastTeleportAt = 0
+
+export function markTeleported(): void {
+  lastTeleportAt = Date.now()
+}
+
+export function isInTeleportFreeze(): boolean {
+  return Date.now() - lastTeleportAt < TP_FREEZE_MS
+}
+
 export function getCurrentBehavior(): BehaviorId {
   return currentBehavior
 }

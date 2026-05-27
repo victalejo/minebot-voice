@@ -10,6 +10,7 @@ import {
   stopCurrentBehavior,
   getCurrentBehavior,
   hasUserPathfinder,
+  isInTeleportFreeze,
   type BehaviorId,
 } from './behaviors.js'
 import type { ActivityLogger } from './actions.js'
@@ -57,6 +58,12 @@ function decideState(
   // Without this, sleeping/returning_home would stomp on the user's intent.
   if (hasUserPathfinder()) {
     return { state: 'executing_command', reason: 'user goal active' }
+  }
+
+  // After a server-forced teleport, freeze autonomous behaviors for a window
+  // so the bot doesn't immediately walk back toward an old base/goal/path.
+  if (isInTeleportFreeze()) {
+    return { state: 'idle', reason: 'recently teleported, staying put' }
   }
 
   // Night + safe — try to sleep
