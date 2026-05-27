@@ -50,6 +50,11 @@ export interface BotContext {
   knownLocations?: string
   // Who issued the command. Lets actions like `follow` default to the speaker.
   speaker?: string
+  // Source of the message: 'chat' (in-game, AI decides if addressed to bot)
+  // or 'dashboard' (web UI, always treat as a command).
+  source?: 'chat' | 'dashboard'
+  // The bot's own in-game name, so the AI can recognize when it's being addressed.
+  botName?: string
 }
 
 export const ACTION_SCHEMA = `
@@ -187,7 +192,25 @@ export function buildPrompt(command: string, ctx: BotContext, historyContext?: s
 - Inventory: ${inventoryStr}`
 
   if (ctx.speaker) {
-    prompt += `\n\n## Speaker\nThe command was issued by player "${ctx.speaker}". When the speaker says "ven aquí", "sígueme", "ven conmigo", or similar, the target player is "${ctx.speaker}" — do not ask for their name.`
+    prompt += `\n\n## Speaker\nMessage from player "${ctx.speaker}". Your in-game name is "${ctx.botName ?? 'bot'}". When the speaker says "ven aquí", "sígueme", "ven conmigo", or similar, the target player is "${ctx.speaker}" — do not ask for their name.`
+  }
+
+  if (ctx.source === 'chat') {
+    prompt += `\n\n## Chat decision
+This message came from in-game public chat. Decide if it's directed at you.
+
+Respond (use \`say\` or any other action) when:
+- Your name "${ctx.botName ?? 'bot'}" is mentioned anywhere in the message.
+- The message is a question or greeting addressed to everyone ("hola a todos", "alguien sabe X", "que hacen", "que tal todos").
+- Someone explicitly asks for help and you can contribute.
+
+Stay silent (return \`actions: []\` with understood="ignorar: not for me") when:
+- Two other players are clearly talking to each other (e.g. "<otherPlayer>, vamos a la base").
+- Simple short acknowledgments between others ("ok", "si", "gracias", "lol").
+- Auth/login chatter, server commands echoed, spam.
+- You have nothing useful to add.
+
+Lean toward responding when in doubt about a general or social message; stay silent only when clearly not for you.`
   }
 
   if (ctx.knownLocations && ctx.knownLocations.length > 0) {

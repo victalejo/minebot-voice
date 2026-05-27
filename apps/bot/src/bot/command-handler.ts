@@ -34,6 +34,7 @@ export async function handleNaturalCommand(
   text: string,
   speakerName: string,
   deps: CommandHandlerDeps,
+  source: 'chat' | 'dashboard' = 'dashboard',
 ): Promise<CommandOutcome> {
   if (!text || typeof text !== 'string' || text.length > MAX_COMMAND_LENGTH) {
     return { ok: false, reason: 'invalid or too long' }
@@ -61,6 +62,8 @@ export async function handleNaturalCommand(
     isRaining: bot.isRaining,
     knownLocations: formatLocationsForPrompt(db),
     speaker: speakerName,
+    source,
+    botName: process.env.BOT_NAME || bot.username,
   }
 
   try {

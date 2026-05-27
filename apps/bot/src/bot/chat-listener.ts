@@ -1,58 +1,51 @@
 import type { Bot } from 'mineflayer'
 import { handleNaturalCommand, type CommandHandlerDeps } from './command-handler.js'
 
-// How long the same player must wait before issuing another in-game command.
-const CHAT_COOLDOWN_MS = 3000
-
-// Maximum chat message length we accept as a command. mineflayer caps chat
-// at 256 characters server-side anyway, but cap explicitly to be safe.
+// Per-player and global throttles so a busy chat doesn't drown the AI in calls.
+const PLAYER_COOLDOWN_MS = 2500
+const GLOBAL_COOLDOWN_MS = 1200
 const MAX_CHAT_LENGTH = 256
+const MIN_CHAT_LENGTH = 2
 
 export interface ChatListenerHandle {
   stop: () => void
 }
 
-// Listen for in-game chat addressed to the bot by name and route those
-// messages through the same natural-command pipeline used by the dashboard.
+// Route every in-game chat message through the AI, which decides whether the
+// message warrants a response (own name mentioned, general question, social
+// greeting, ...) or should be ignored (two other players talking, short
+// acknowledgments, auth passwords). The AI returns empty actions to stay silent.
 export function setupChatListener(
   bot: Bot,
   deps: CommandHandlerDeps,
   botName: string,
 ): ChatListenerHandle {
   const cooldowns = new Map<string, number>()
-  const namePattern = buildMentionRegex(botName)
+  let lastGlobal = 0
+  const authPassword = process.env.MC_AUTH_PASSWORD?.trim()
 
-  console.log(`[Chat] Listening for mentions of "${botName}"`)
+  console.log(`[Chat] Listening as "${botName}" — AI judges every message`)
 
   const onChat = (username: string, message: string): void => {
-    // Ignore our own messages so a "say" action doesn't echo into a command.
     if (username === bot.username) return
     if (!message || typeof message !== 'string') return
-    if (message.length > MAX_CHAT_LENGTH) return
 
-    if (!namePattern.test(message)) return
-    // Strip the bot name (and a trailing comma/colon/dash if present) from
-    // wherever it appears in the message — start, middle, or end.
-    const rest = message.replace(namePattern, ' ').replace(/\s+/g, ' ').trim()
-    if (!rest) {
-      // Just our name with nothing after — acknowledge briefly without
-      // burning an AI call.
-      bot.chat(`¿sí, ${username}?`)
-      return
-    }
+    const msg = message.trim()
+    if (msg.length < MIN_CHAT_LENGTH || msg.length > MAX_CHAT_LENGTH) return
+    if (authPassword && msg === authPassword) return  // someone else's login attempt
+    if (msg.startsWith('/')) return  // server command echo
 
     const now = Date.now()
+    if (now - lastGlobal < GLOBAL_COOLDOWN_MS) return  // global rate limit, silent
     const last = cooldowns.get(username) ?? 0
-    if (now - last < CHAT_COOLDOWN_MS) {
-      bot.chat(`${username}, espera un momento`)
-      return
-    }
-    cooldowns.set(username, now)
+    if (now - last < PLAYER_COOLDOWN_MS) return  // per-player rate limit, silent
 
-    // Fire and forget — handler manages its own error reporting via socket.
-    void handleNaturalCommand(rest, username, deps).catch((err: unknown) => {
-      const msg = err instanceof Error ? err.message : String(err)
-      console.error('[Chat] Command handler crashed:', msg)
+    cooldowns.set(username, now)
+    lastGlobal = now
+
+    void handleNaturalCommand(msg, username, deps, 'chat').catch((err: unknown) => {
+      const errMsg = err instanceof Error ? err.message : String(err)
+      console.error('[Chat] Command handler crashed:', errMsg)
     })
   }
 
@@ -63,13 +56,4 @@ export function setupChatListener(
       bot.removeListener('chat', onChat)
     },
   }
-}
-
-// Case-insensitive global regex that matches the bot name anywhere in the
-// message, with optional "@" prefix and optional trailing punctuation. Uses \b
-// so "Juan" doesn't match "Juanito". Used both to detect mentions and to strip
-// the name out before sending the rest to the AI.
-function buildMentionRegex(name: string): RegExp {
-  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return new RegExp(`(?:^|\\s)@?${escaped}\\b[,:.\\-]*`, 'gi')
 }
