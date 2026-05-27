@@ -17,8 +17,26 @@ const openai = AI_PROVIDER === 'openai'
   : null
 
 const AI_MODEL = process.env.AI_MODEL ?? (
-  AI_PROVIDER === 'openai' ? 'MiniMax-M2.5' : 'claude-sonnet-4-20250514'
+  AI_PROVIDER === 'openai' ? 'deepseek-v4-flash' : 'claude-sonnet-4-20250514'
 )
+
+// json_schema (strict): OpenAI, MiniMax. json_object: DeepSeek and most others.
+const OPENAI_JSON_MODE = (process.env.OPENAI_JSON_MODE ?? 'json_object') as
+  | 'json_object'
+  | 'json_schema'
+
+// DeepSeek V4 Pro thinking mode. Ignored by Flash and other providers.
+// Values: 'enabled' | 'disabled' | undefined (omit param entirely).
+const OPENAI_THINKING = process.env.OPENAI_THINKING as
+  | 'enabled'
+  | 'disabled'
+  | undefined
+const OPENAI_REASONING_EFFORT = process.env.OPENAI_REASONING_EFFORT as
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'max'
+  | undefined
 
 export interface BotContext {
   health: number
@@ -27,6 +45,9 @@ export interface BotContext {
   inventory: string[]
   timeOfDay: number
   isRaining: boolean
+  // Pre-formatted multi-line listing of saved locations ("- base (kind=base): x=... y=... z=...").
+  // Empty string if none.
+  knownLocations?: string
 }
 
 export const ACTION_SCHEMA = `
@@ -35,6 +56,7 @@ Available actions (respond with exactly these JSON shapes):
 1. moveTo: { "action": "moveTo", "x": number, "y": number, "z": number }
 2. mine: { "action": "mine", "block": string, "count": number }
    - block must be the Minecraft block ID (e.g. "diamond_ore", "stone", "oak_log")
+   - Use for small, specific quantities. For "consigue 20 madera" prefer setGoal.
 3. digDown: { "action": "digDown", "toY": number }
    - toY is the Y coordinate to dig down to (diamond level is around -59)
 4. follow: { "action": "follow", "player": string }
@@ -48,6 +70,12 @@ Available actions (respond with exactly these JSON shapes):
 9. stop: { "action": "stop" }
 10. say: { "action": "say", "message": string }
 11. sleep: { "action": "sleep" }
+12. setGoal: { "action": "setGoal", "resource": "wood"|"food"|"stone", "count": number, "description": string }
+    - Use for long-running autonomous tasks ("consigue madera", "junta comida")
+    - The bot will pursue this goal in the background while still surviving (eating, fleeing, etc).
+    - description is a short Spanish phrase shown to the user.
+13. cancelGoal: { "action": "cancelGoal" }
+    - Cancels the current goal and clears the queue. Use when the user says "para", "cancela", "olvídalo".
 `.trim()
 
 const SYSTEM_PROMPT = `You are MineBot, an expert Minecraft bot that translates natural language commands into action sequences. You are resourceful, smart, and always find a way to fulfill requests.
@@ -71,6 +99,12 @@ Do NOT check memory for simple, self-contained commands like "mina 10 piedra" or
 - If a command is ambiguous, make reasonable assumptions and execute.
 - If the user says something casual ("hola", "que haces"), respond with a say action.
 - If you CANNOT fulfill a request (missing materials, impossible task), use a "say" action to explain why. NEVER respond with plain text.
+
+## Goals vs immediate actions
+- "Consigue/junta/recolecta N madera|comida|piedra" → use setGoal with resource and count. The bot pursues it autonomously (will eat, defend itself, sleep while gathering).
+- "Mina 5 piedra aquí" (small, immediate) → use mine.
+- "Para/cancela/olvídalo" → use cancelGoal (then optionally a say to confirm).
+- A setGoal does NOT need to be combined with mine/attack — the goal handles its own gathering loop.
 
 ## Response format (MANDATORY — every response must be exactly this shape)
 {"understood": "<Spanish description>", "actions": [...]}
@@ -97,6 +131,8 @@ const COMMAND_RESPONSE_SCHEMA = {
           item: { type: 'string' as const },
           destination: { type: 'string' as const },
           message: { type: 'string' as const },
+          resource: { type: 'string' as const },
+          description: { type: 'string' as const },
         },
         required: ['action'],
         additionalProperties: false,
@@ -118,6 +154,10 @@ export function buildPrompt(command: string, ctx: BotContext, historyContext?: s
 - Position: x=${ctx.position.x}, y=${ctx.position.y}, z=${ctx.position.z}
 - Time: ${timeStr}${ctx.isRaining ? ', lloviendo' : ''}
 - Inventory: ${inventoryStr}`
+
+  if (ctx.knownLocations && ctx.knownLocations.length > 0) {
+    prompt += `\n\n## Saved locations\n${ctx.knownLocations}`
+  }
 
   if (historyContext) {
     prompt += `\n\n## Recent conversation\n${historyContext}`
@@ -329,21 +369,33 @@ async function parseCommandOpenAI(
     { role: 'user', content: prompt },
   ]
 
+  const responseFormat: OpenAI.ChatCompletionCreateParams['response_format'] =
+    OPENAI_JSON_MODE === 'json_schema'
+      ? {
+          type: 'json_schema',
+          json_schema: {
+            name: 'command_response',
+            strict: true,
+            schema: COMMAND_RESPONSE_SCHEMA,
+          },
+        }
+      : { type: 'json_object' }
+
+  // DeepSeek-specific extras (silently ignored by other providers via extra_body).
+  const extraBody = OPENAI_THINKING
+    ? { thinking: { type: OPENAI_THINKING } }
+    : undefined
+
   for (let i = 0; i < 5; i++) {
     const response = await openai!.chat.completions.create({
       model: AI_MODEL,
       max_tokens: 1024,
       messages,
       tools: [openaiMemoryToolDef],
-      response_format: {
-        type: 'json_schema',
-        json_schema: {
-          name: 'command_response',
-          strict: true,
-          schema: COMMAND_RESPONSE_SCHEMA,
-        },
-      },
-    })
+      response_format: responseFormat,
+      ...(OPENAI_REASONING_EFFORT && { reasoning_effort: OPENAI_REASONING_EFFORT }),
+      ...(extraBody && { extra_body: extraBody }),
+    } as OpenAI.ChatCompletionCreateParamsNonStreaming)
 
     const choice = response.choices[0]
     const msg = choice.message
@@ -364,9 +416,8 @@ async function parseCommandOpenAI(
     const raw = msg.content ?? ''
     console.log('[AI] Raw response:', raw.slice(0, 300))
 
-    // response_format guarantees valid JSON matching our schema
-    const parsed = JSON.parse(raw) as { understood: string; actions: BotAction[] }
-    return { understood: parsed.understood, actions: parsed.actions }
+    // json_object isn't strict-schema, so use the tolerant parser as a safety net.
+    return parseResponse(raw)
   }
 
   return { understood: 'Demasiadas iteraciones de memoria. Intenta de nuevo.', actions: [] }

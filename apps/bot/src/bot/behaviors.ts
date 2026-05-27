@@ -1,249 +1,196 @@
 import type { Bot } from 'mineflayer'
-import type { BotState } from '@minebot/shared'
+import type { Vec3 } from 'vec3'
 import pathfinderPkg from 'mineflayer-pathfinder'
+import type { ActivityLogger } from './actions.js'
+
+type Entity = Bot['entity']
 
 const { goals } = pathfinderPkg
-const { GoalXZ, GoalNear, GoalInvert, GoalFollow } = goals
+const { GoalNear, GoalXZ } = goals
 
-export type ActivityLogger = (
-  type: 'danger' | 'command' | 'action' | 'info',
-  message: string,
-) => void
+// Behavior identity — what's currently running. Tick layer uses this to know
+// if a switch is needed.
+export type BehaviorId =
+  | 'flee'
+  | 'combat'
+  | 'sleep'
+  | 'go_home'
+  | 'idle'
+  | null
 
-const HOSTILE_MOBS = new Set([
-  'zombie', 'skeleton', 'creeper', 'spider', 'enderman',
-  'witch', 'pillager', 'vindicator', 'drowned', 'phantom',
-])
+let currentBehavior: BehaviorId = null
+let currentAbort: AbortController | null = null
 
-const JUNK_ITEMS = new Set([
-  'dirt', 'cobblestone', 'gravel', 'sand', 'cobbled_deepslate',
-  'diorite', 'granite', 'andesite', 'tuff', 'netherrack',
-])
-
-const GATHERABLE_LOGS = [
-  'oak_log', 'birch_log', 'spruce_log', 'dark_oak_log', 'jungle_log', 'acacia_log',
-]
-
-let running = false
-let lastBehaviorTime = 0
-
-const BEHAVIOR_COOLDOWN = 4_000 // 4s between behavior attempts
-
-export function isBehaviorRunning(): boolean {
-  return running
+export function getCurrentBehavior(): BehaviorId {
+  return currentBehavior
 }
 
-export function canStartBehavior(): boolean {
-  return !running && Date.now() - lastBehaviorTime > BEHAVIOR_COOLDOWN
-}
-
+// Stop whatever is running (pathfinder, pvp, sleep). Idempotent.
 export function stopCurrentBehavior(bot: Bot): void {
-  try {
-    bot.pathfinder.stop()
-    ;(bot as any).pvp.stop()
-  } catch { /* noop */ }
+  if (currentAbort) {
+    currentAbort.abort()
+    currentAbort = null
+  }
+  try { bot.pathfinder?.stop() } catch { /* noop */ }
+  try { (bot as any).pvp?.stop() } catch { /* noop */ }
+  currentBehavior = null
 }
 
-// --- IDLE BEHAVIORS ---
-
-async function wander(bot: Bot, log: ActivityLogger): Promise<void> {
-  const pos = bot.entity.position
-  const angle = Math.random() * Math.PI * 2
-  const dist = 15 + Math.random() * 35
-  const x = pos.x + Math.cos(angle) * dist
-  const z = pos.z + Math.sin(angle) * dist
-  log('action', `Exploring area (${Math.round(x)}, ${Math.round(z)})`)
-  await bot.pathfinder.goto(new GoalXZ(x, z))
+function startBehavior(id: BehaviorId, bot: Bot): AbortController {
+  if (currentBehavior !== null) stopCurrentBehavior(bot)
+  currentBehavior = id
+  currentAbort = new AbortController()
+  return currentAbort
 }
 
-async function gatherNearbyWood(bot: Bot, log: ActivityLogger): Promise<boolean> {
-  for (const logName of GATHERABLE_LOGS) {
-    const blockType = bot.registry.blocksByName[logName]
-    if (!blockType) continue
-    const blocks = bot.findBlocks({ matching: blockType.id, maxDistance: 32, count: 1 })
-    if (blocks.length === 0) continue
-    const block = bot.blockAt(blocks[0])
-    if (!block) continue
-    log('action', `Gathering ${logName}`)
-    await (bot as any).collectBlock.collect(block)
-    return true
-  }
-  return false
-}
+// ── flee: run from nearest hostile when HP critical ───────────────────────────
 
-async function mineNearbyStone(bot: Bot, log: ActivityLogger): Promise<boolean> {
-  const hasPickaxe = bot.inventory.items().some((i) =>
-    i.name.includes('pickaxe'),
-  )
-  if (!hasPickaxe) return false
+const FLEE_DISTANCE = 24
 
-  const targets = ['coal_ore', 'iron_ore', 'copper_ore', 'stone']
-  for (const blockName of targets) {
-    const blockType = bot.registry.blocksByName[blockName]
-    if (!blockType) continue
-    const blocks = bot.findBlocks({ matching: blockType.id, maxDistance: 32, count: 1 })
-    if (blocks.length === 0) continue
-    const block = bot.blockAt(blocks[0])
-    if (!block) continue
-    log('action', `Mining ${blockName}`)
-    await (bot as any).collectBlock.collect(block)
-    return true
-  }
-  return false
-}
-
-async function lookAround(bot: Bot): Promise<void> {
-  const yaw = Math.random() * Math.PI * 2
-  const pitch = (Math.random() - 0.5) * 0.6
-  await bot.look(yaw, pitch, false)
-}
-
-async function runIdleBehavior(bot: Bot, log: ActivityLogger): Promise<void> {
-  const roll = Math.random()
-
-  if (roll < 0.35) {
-    // 35%: try to gather wood
-    const gathered = await gatherNearbyWood(bot, log)
-    if (!gathered) await wander(bot, log)
-  } else if (roll < 0.55) {
-    // 20%: try to mine stone/ore
-    const mined = await mineNearbyStone(bot, log)
-    if (!mined) await wander(bot, log)
-  } else if (roll < 0.85) {
-    // 30%: wander
-    await wander(bot, log)
-  } else {
-    // 15%: look around
-    await lookAround(bot)
-  }
-}
-
-// --- SURVIVING BEHAVIORS ---
-
-async function runSurvivingBehavior(bot: Bot, log: ActivityLogger): Promise<void> {
-  const nearestHostile = bot.nearestEntity((e) =>
-    e.name != null && HOSTILE_MOBS.has(e.name),
-  )
-
-  if (!nearestHostile) return
-
-  const dist = bot.entity.position.distanceTo(nearestHostile.position)
-
-  // If low health or it's a creeper, flee
-  if (bot.health < 8 || nearestHostile.name === 'creeper') {
-    log('danger', `Fleeing from ${nearestHostile.name} (health: ${bot.health})`)
-    const fleeGoal = new GoalInvert(new GoalFollow(nearestHostile, 5))
-    bot.pathfinder.setGoal(fleeGoal, true)
-
-    // Flee for a few seconds then stop
-    await new Promise((resolve) => setTimeout(resolve, 4000))
-    bot.pathfinder.stop()
-    return
-  }
-
-  // Otherwise, fight
-  if (dist < 16) {
-    log('action', `Fighting ${nearestHostile.name}`)
-    ;(bot as any).pvp.attack(nearestHostile)
-
-    // Wait for combat to finish or timeout
-    await new Promise<void>((resolve) => {
-      const timeout = setTimeout(() => {
-        ;(bot as any).pvp.stop()
-        resolve()
-      }, 10000)
-
-      ;(bot as any).pvp.once('stoppedAttacking', () => {
-        clearTimeout(timeout)
-        resolve()
-      })
-    })
-  }
-}
-
-// --- MAINTAINING BEHAVIORS ---
-
-async function runMaintainingBehavior(bot: Bot, log: ActivityLogger): Promise<void> {
-  const inventoryFull = bot.inventory.items().length >= 36
-
-  if (inventoryFull) {
-    // Drop junk items
-    for (const item of bot.inventory.items()) {
-      if (JUNK_ITEMS.has(item.name) && item.count > 16) {
-        log('action', `Dropping excess ${item.name}`)
-        await bot.toss(item.type, null, item.count - 16)
-      }
-    }
-    return
-  }
-
-  // Try to sleep in a nearby bed
-  if (!bot.isSleeping) {
-    const bedNames = [
-      'white_bed', 'orange_bed', 'magenta_bed', 'light_blue_bed',
-      'yellow_bed', 'lime_bed', 'pink_bed', 'gray_bed',
-      'light_gray_bed', 'cyan_bed', 'purple_bed', 'blue_bed',
-      'brown_bed', 'green_bed', 'red_bed', 'black_bed',
-    ]
-    const bedIds = bedNames
-      .map((name) => bot.registry.blocksByName[name]?.id)
-      .filter((id): id is number => id != null)
-    const beds = bot.findBlocks({ matching: bedIds, maxDistance: 64, count: 1 })
-
-    if (beds.length > 0) {
-      const bedBlock = bot.blockAt(beds[0])
-      if (bedBlock) {
-        try {
-          log('action', `Pathfinding to bed at (${beds[0].x}, ${beds[0].y}, ${beds[0].z})`)
-          await bot.pathfinder.goto(new GoalNear(bedBlock.position.x, bedBlock.position.y, bedBlock.position.z, 2))
-          log('action', 'Sleeping in bed for the night')
-          await bot.sleep(bedBlock)
-          log('info', 'Sleeping...')
-          return
-        } catch (err: any) {
-          log('info', `Could not sleep in bed: ${err?.message ?? String(err)}`)
-        }
-      }
-    }
-  }
-
-  // Night + outdoors: stay alert (log only occasionally to avoid spam)
-  if (Math.random() < 0.15) {
-    log('info', 'Staying alert during the night')
-  }
-  await lookAround(bot)
-}
-
-// --- MAIN BEHAVIOR RUNNER ---
-
-export async function runBehavior(
-  state: BotState,
+export async function fleeBehavior(
   bot: Bot,
+  threat: Entity,
   log: ActivityLogger,
 ): Promise<void> {
-  if (running) return
-  running = true
-  lastBehaviorTime = Date.now()
+  const abort = startBehavior('flee', bot)
+  log('danger', `Fleeing from ${threat.name ?? 'unknown'} (HP ${bot.health})`)
+
+  // Compute opposite direction from threat and pick a faraway XZ goal.
+  const dx = bot.entity.position.x - threat.position.x
+  const dz = bot.entity.position.z - threat.position.z
+  const length = Math.sqrt(dx * dx + dz * dz) || 1
+  const targetX = Math.floor(bot.entity.position.x + (dx / length) * FLEE_DISTANCE)
+  const targetZ = Math.floor(bot.entity.position.z + (dz / length) * FLEE_DISTANCE)
 
   try {
-    switch (state) {
-      case 'idle':
-        await runIdleBehavior(bot, log)
-        break
-      case 'surviving':
-        await runSurvivingBehavior(bot, log)
-        break
-      case 'maintaining':
-        await runMaintainingBehavior(bot, log)
-        break
-      case 'executing_command':
-        // Handled by voice command system, don't interfere
-        break
+    await bot.pathfinder.goto(new GoalXZ(targetX, targetZ))
+    if (!abort.signal.aborted) log('info', 'Reached safe distance')
+  } catch (err: unknown) {
+    if (!abort.signal.aborted) {
+      const msg = err instanceof Error ? err.message : String(err)
+      log('info', `Flee path failed: ${msg}`)
     }
+  } finally {
+    if (currentBehavior === 'flee') currentBehavior = null
+  }
+}
+
+// ── combat: engage nearest hostile via pvp plugin ─────────────────────────────
+
+export async function combatBehavior(
+  bot: Bot,
+  target: Entity,
+  log: ActivityLogger,
+): Promise<void> {
+  startBehavior('combat', bot)
+  log('action', `Engaging ${target.name ?? 'hostile'}`)
+
+  try {
+    // Auto-equip best sword in inventory before attacking.
+    await equipBestWeapon(bot)
+    ;(bot as any).pvp.attack(target)
+    // pvp plugin runs async; we don't await it. The tick loop will see when
+    // the target dies/leaves and clear the behavior.
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
-    console.error(`[Behaviors] Error in ${state}:`, msg)
+    log('info', `Combat error: ${msg}`)
+    if (currentBehavior === 'combat') currentBehavior = null
+  }
+}
+
+const WEAPON_PRIORITY = [
+  'netherite_sword', 'diamond_sword', 'iron_sword',
+  'stone_sword', 'wooden_sword', 'golden_sword',
+  'netherite_axe', 'diamond_axe', 'iron_axe',
+  'stone_axe', 'wooden_axe',
+]
+
+async function equipBestWeapon(bot: Bot): Promise<void> {
+  for (const name of WEAPON_PRIORITY) {
+    const item = bot.inventory.items().find((i) => i.name === name)
+    if (item) {
+      try { await bot.equip(item, 'hand') } catch { /* noop */ }
+      return
+    }
+  }
+}
+
+// Called by tick layer to check if combat target is still valid.
+export function isCombatTargetAlive(bot: Bot, target: Entity): boolean {
+  const found = bot.entities[target.id]
+  return found != null && found.isValid !== false
+}
+
+// ── sleep: find nearest bed and use it ────────────────────────────────────────
+
+const BED_NAMES = [
+  'white_bed', 'orange_bed', 'magenta_bed', 'light_blue_bed',
+  'yellow_bed', 'lime_bed', 'pink_bed', 'gray_bed',
+  'light_gray_bed', 'cyan_bed', 'purple_bed', 'blue_bed',
+  'brown_bed', 'green_bed', 'red_bed', 'black_bed',
+]
+
+export async function sleepBehavior(
+  bot: Bot,
+  log: ActivityLogger,
+): Promise<boolean> {
+  const abort = startBehavior('sleep', bot)
+  log('action', 'Looking for a bed')
+
+  const bedIds = BED_NAMES
+    .map((name) => bot.registry.blocksByName[name]?.id)
+    .filter((id): id is number => id != null)
+  const beds = bot.findBlocks({ matching: bedIds, maxDistance: 32, count: 1 })
+
+  if (beds.length === 0) {
+    log('info', 'No bed found within 32 blocks')
+    if (currentBehavior === 'sleep') currentBehavior = null
+    return false
+  }
+
+  const bedPos = beds[0]
+  const bedBlock = bot.blockAt(bedPos)
+  if (!bedBlock) {
+    if (currentBehavior === 'sleep') currentBehavior = null
+    return false
+  }
+
+  try {
+    await bot.pathfinder.goto(new GoalNear(bedPos.x, bedPos.y, bedPos.z, 2))
+    if (abort.signal.aborted) return false
+    await bot.sleep(bedBlock)
+    log('info', 'Sleeping')
+    return true
+  } catch (err: unknown) {
+    if (!abort.signal.aborted) {
+      const msg = err instanceof Error ? err.message : String(err)
+      log('info', `Could not sleep: ${msg}`)
+    }
+    return false
   } finally {
-    running = false
+    if (currentBehavior === 'sleep') currentBehavior = null
+  }
+}
+
+// ── go_home: navigate back to a memorized base location ──────────────────────
+
+export async function goHomeBehavior(
+  bot: Bot,
+  base: Vec3,
+  log: ActivityLogger,
+): Promise<void> {
+  const abort = startBehavior('go_home', bot)
+  log('action', `Returning to base (${Math.round(base.x)}, ${Math.round(base.y)}, ${Math.round(base.z)})`)
+
+  try {
+    await bot.pathfinder.goto(new GoalNear(base.x, base.y, base.z, 2))
+    if (!abort.signal.aborted) log('info', 'Arrived at base')
+  } catch (err: unknown) {
+    if (!abort.signal.aborted) {
+      const msg = err instanceof Error ? err.message : String(err)
+      log('info', `Go-home failed: ${msg}`)
+    }
+  } finally {
+    if (currentBehavior === 'go_home') currentBehavior = null
   }
 }

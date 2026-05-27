@@ -10,7 +10,6 @@ import { authRouter, verifyToken } from './auth.js'
 import { connectBot, setLifecycleWirer } from './bot/index.js'
 import { setupSocketBridge } from './socket/events.js'
 import { getDb } from './db/index.js'
-import { getRecentActivity, getActivityBefore } from './db/activity.js'
 import { getDesiredState } from './db/bot-config.js'
 
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
@@ -46,25 +45,6 @@ app.use(authRouter())
 
 getDb() // Initialize database on startup
 
-// Paginated activity endpoint
-app.get('/api/activity', (req, res) => {
-  const token = req.headers.authorization?.replace('Bearer ', '')
-  if (!token || !verifyToken(token)) {
-    res.status(401).json({ error: 'Unauthorized' })
-    return
-  }
-
-  const db = getDb()
-  const limit = Math.min(Number(req.query.limit) || 50, 100)
-  const before = Number(req.query.before) || 0
-
-  const events = before > 0
-    ? getActivityBefore(db, before, limit)
-    : getRecentActivity(db, limit)
-
-  res.json({ events, hasMore: events.length === limit })
-})
-
 // Serve frontend static files in production
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const webDist = join(__dirname, '../../web/dist')
@@ -94,7 +74,7 @@ const PORT = Number(process.env.PORT) || 3001
 
 function wireBotLifecycleBroadcasts(bot: ReturnType<typeof connectBot>): void {
   bot.on('spawn', () => {
-    // stopBotListeners first in case of reconnection — avoids duplicate intervals
+    // stopBotListeners first to avoid duplicate listeners on reconnect
     stopBotListeners()
     startBotListeners(bot)
   })

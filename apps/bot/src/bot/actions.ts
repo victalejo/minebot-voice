@@ -1,20 +1,35 @@
 import type { Bot } from 'mineflayer'
+import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import type { BotAction } from '@minebot/shared'
 import pathfinderPkg from 'mineflayer-pathfinder'
+import type { GoalManager } from './goals.js'
+import * as schema from '../db/schema.js'
+import { setLocation, getLocation, deleteLocation } from '../db/locations.js'
 
 const { goals } = pathfinderPkg
 const { GoalNear, GoalFollow, GoalY } = goals
+
+type Db = BetterSQLite3Database<typeof schema>
 
 export type ActivityLogger = (
   type: 'danger' | 'command' | 'action' | 'info',
   message: string,
 ) => void
 
+export interface ActionContext {
+  log: ActivityLogger
+  // Optional — without it, setGoal/cancelGoal are no-ops with a log warning.
+  goalManager?: GoalManager | null
+  // Optional — without it, rememberHere/goToLocation/forgetLocation log a warning.
+  db?: Db | null
+}
+
 export async function executeAction(
   bot: Bot,
   action: BotAction,
-  log: ActivityLogger,
+  ctx: ActionContext,
 ): Promise<void> {
+  const { log } = ctx
   switch (action.action) {
     case 'moveTo': {
       log('action', `Moving to (${action.x}, ${action.y}, ${action.z})`)
@@ -151,6 +166,78 @@ export async function executeAction(
       break
     }
 
+    case 'setGoal': {
+      if (!ctx.goalManager) {
+        log('info', 'setGoal ignored: goal manager not initialised')
+        break
+      }
+      const description =
+        action.description ??
+        `Recolectar ${action.count} de ${action.resource}`
+      ctx.goalManager.enqueue({
+        kind: 'gather',
+        resource: action.resource,
+        targetCount: action.count,
+        description,
+      })
+      log('action', `Queued: ${description}`)
+      break
+    }
+
+    case 'cancelGoal': {
+      if (!ctx.goalManager) {
+        log('info', 'cancelGoal ignored: goal manager not initialised')
+        break
+      }
+      ctx.goalManager.cancelAll()
+      break
+    }
+
+    case 'rememberHere': {
+      if (!ctx.db) {
+        log('info', 'rememberHere ignored: db not available')
+        break
+      }
+      const pos = bot.entity.position
+      const x = Math.floor(pos.x)
+      const y = Math.floor(pos.y)
+      const z = Math.floor(pos.z)
+      setLocation(ctx.db, { name: action.name, kind: action.kind, x, y, z })
+      log('action', `Saved "${action.name}" (${action.kind}) at (${x}, ${y}, ${z})`)
+      break
+    }
+
+    case 'goToLocation': {
+      if (!ctx.db) {
+        log('info', 'goToLocation ignored: db not available')
+        break
+      }
+      const loc = getLocation(ctx.db, action.name)
+      if (!loc) {
+        log('info', `No saved location named "${action.name}"`)
+        break
+      }
+      log('action', `Walking to "${action.name}" (${loc.x}, ${loc.y}, ${loc.z})`)
+      await bot.pathfinder.goto(new GoalNear(loc.x, loc.y, loc.z, 2))
+      log('info', `Arrived at "${action.name}"`)
+      break
+    }
+
+    case 'forgetLocation': {
+      if (!ctx.db) {
+        log('info', 'forgetLocation ignored: db not available')
+        break
+      }
+      const existing = getLocation(ctx.db, action.name)
+      if (!existing) {
+        log('info', `Nothing to forget — "${action.name}" not saved`)
+        break
+      }
+      deleteLocation(ctx.db, action.name)
+      log('action', `Forgot location "${action.name}"`)
+      break
+    }
+
     case 'sleep': {
       log('action', 'Looking for a bed to sleep in')
       const bedNames = [
@@ -194,9 +281,9 @@ export async function executeAction(
 export async function executeActions(
   bot: Bot,
   actions: BotAction[],
-  log: ActivityLogger,
+  ctx: ActionContext,
 ): Promise<void> {
   for (const action of actions) {
-    await executeAction(bot, action, log)
+    await executeAction(bot, action, ctx)
   }
 }

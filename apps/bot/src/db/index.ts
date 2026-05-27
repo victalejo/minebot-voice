@@ -35,19 +35,37 @@ export function getDb() {
   `)
 
   sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS activity_events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      type TEXT NOT NULL,
-      message TEXT NOT NULL,
-      timestamp INTEGER NOT NULL
-    )
-  `)
-
-  sqlite.exec(`
     CREATE TABLE IF NOT EXISTS bot_config (
       id INTEGER PRIMARY KEY,
       desired_state TEXT NOT NULL,
       updated_at INTEGER NOT NULL
+    )
+  `)
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS locations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      kind TEXT NOT NULL,
+      x INTEGER NOT NULL,
+      y INTEGER NOT NULL,
+      z INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    )
+  `)
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS goals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind TEXT NOT NULL,
+      resource TEXT,
+      target_count INTEGER,
+      description TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      started_at INTEGER,
+      completed_at INTEGER,
+      error TEXT
     )
   `)
 

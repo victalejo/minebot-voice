@@ -1,5 +1,40 @@
-// Bot state for the autonomous state machine
-export type BotState = 'surviving' | 'executing_command' | 'maintaining' | 'idle'
+// Bot state for the autonomous state machine.
+// Priority (highest first):
+//   fleeing           — HP critical, escaping
+//   defending         — engaging a hostile mob
+//   sleeping          — using a bed
+//   executing_command — running a user-issued command
+//   returning_home    — navigating back to base
+//   gathering         — pursuing an active goal (e.g. collect wood)
+//   idle              — no active goal
+export type BotState =
+  | 'fleeing'
+  | 'defending'
+  | 'sleeping'
+  | 'executing_command'
+  | 'returning_home'
+  | 'gathering'
+  | 'idle'
+
+// Kinds of resources the bot can gather as a goal.
+export type GatherResource = 'wood' | 'food' | 'stone'
+
+// Goal lifecycle status (mirrors DB column).
+export type GoalStatus = 'pending' | 'active' | 'completed' | 'failed' | 'cancelled'
+
+// A goal as exposed to the dashboard / API.
+export interface Goal {
+  id: number
+  kind: 'gather' | 'free_text'
+  resource: GatherResource | null   // null when kind === 'free_text'
+  targetCount: number | null        // null when kind === 'free_text'
+  description: string
+  status: GoalStatus
+  createdAt: number
+  startedAt: number | null
+  completedAt: number | null
+  error: string | null
+}
 
 // Connection status
 export type BotStatus = 'connecting' | 'connected' | 'disconnected' | 'dead'
@@ -13,6 +48,8 @@ export interface BotStats {
   state: BotState
   timeOfDay: number
   isRaining: boolean
+  // Current high-level goal driving autonomous behavior. Null when idle/no goal.
+  currentGoal: string | null
 }
 
 // Single inventory item
@@ -56,6 +93,18 @@ export type BotAction =
   | { action: 'stop' }
   | { action: 'say'; message: string }
   | { action: 'sleep' }
+  // Long-running autonomous goal. The bot enqueues it and the goal manager
+  // picks it up when no higher-priority state is active.
+  | { action: 'setGoal'; resource: GatherResource; count: number; description?: string }
+  // Cancel the currently active goal (and clear the pending queue).
+  | { action: 'cancelGoal' }
+  // Persist the bot's CURRENT position as a named landmark in DB.
+  // kind: 'base' (main home), 'chest' (storage), 'bed' (sleep spot), or 'other'.
+  | { action: 'rememberHere'; name: string; kind: 'base' | 'chest' | 'bed' | 'other' }
+  // Walk to a previously-saved location by name.
+  | { action: 'goToLocation'; name: string }
+  // Forget a saved location.
+  | { action: 'forgetLocation'; name: string }
 
 // Socket.io typed events
 export interface ServerToClientEvents {
@@ -64,6 +113,7 @@ export interface ServerToClientEvents {
   'bot:activity': (event: ActivityEvent) => void
   'bot:status': (status: BotStatus) => void
   'command:response': (response: CommandResponse) => void
+  'bot:goal': (goal: Goal | null) => void
 }
 
 export interface ClientToServerEvents {

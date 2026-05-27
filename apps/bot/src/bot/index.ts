@@ -14,7 +14,8 @@ let manualDisconnect = false
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let lifecycleWirer: ((bot: Bot) => void) | null = null
 
-const RESISTANCE_APPLY_DELAY_MS = 1500
+const AUTH_LOGIN_DELAY_MS = 800
+const RESISTANCE_APPLY_DELAY_MS = 4000
 const AUTO_RECONNECT_DELAY_MS = 5000
 
 export function getBot(): Bot | null {
@@ -109,6 +110,10 @@ function attachLifecycleLogs(currentBot: Bot): void {
 
   currentBot.on('spawn', () => {
     console.log('[Bot] Spawned in world')
+    const authPassword = process.env.MC_AUTH_PASSWORD
+    if (authPassword) {
+      setTimeout(() => sendAuthPassword(currentBot, authPassword), AUTH_LOGIN_DELAY_MS)
+    }
     setTimeout(() => applyResistanceEffect(currentBot), RESISTANCE_APPLY_DELAY_MS)
   })
 
@@ -151,6 +156,16 @@ function attachReconnectHandler(currentBot: Bot): void {
       lifecycleWirer?.(newBot)
     }, AUTO_RECONNECT_DELAY_MS)
   })
+}
+
+function sendAuthPassword(currentBot: Bot, password: string): void {
+  try {
+    currentBot.chat(password)
+    console.log('[Bot] Sent auth password to chat')
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[Bot] Could not send auth password:', msg)
+  }
 }
 
 function applyResistanceEffect(currentBot: Bot): void {
