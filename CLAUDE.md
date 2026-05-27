@@ -64,6 +64,8 @@ Layer 5 — planner (`ai/goal-planner.ts` + `bot/planner-loop.ts`): When state s
 
 Layer 6 — entry points (`bot/command-handler.ts` + `bot/chat-listener.ts`): both the dashboard socket (`voice:command`) and the in-game chat listener route through `handleNaturalCommand(text, speakerName, deps)`. The chat listener matches a regex built from `BOT_NAME` (defaults to `BOT_USERNAME`) at the start of every chat message; "Juan, consigue madera" strips the prefix and sends the rest as a command. Per-player cooldown of 3s; the bot self-filters its own chat to avoid feedback loops. Bare mentions (just the name) get a polite "¿sí?" reply without an AI call.
 
+Layer 7 — locations (`db/locations.ts`): named landmarks (`base`, `chest_*`, `bed`, `other`) persisted in the `locations` table. The base is auto-seeded from the bot's spawn position on first connection and never overwritten unless the user explicitly says so (via `rememberHere`). `tick.ts` and the planner read the base via `getLocation(db, 'base')` instead of an in-memory cache. The parser includes `formatLocationsForPrompt(db)` output in the prompt so the AI can navigate by name (`goToLocation`).
+
 Plugins (`plugins.ts`): pathfinder, auto-eat (eats at food<14), pvp, collectblock, armor-manager. `entitiesToAvoid` includes creeper/tnt. These plugins handle several reactions transparently — the autonomy layer doesn't re-implement eating or armor-equipping.
 
 `socket/events.ts` orchestrates: spawn → wire bot listeners → create `GoalManager` → `startTick` → `startPlannerLoop`. A stats broadcast fires every 1s; state transitions also push an immediate stats update.

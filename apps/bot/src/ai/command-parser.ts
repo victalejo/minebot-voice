@@ -76,6 +76,15 @@ Available actions (respond with exactly these JSON shapes):
     - description is a short Spanish phrase shown to the user.
 13. cancelGoal: { "action": "cancelGoal" }
     - Cancels the current goal and clears the queue. Use when the user says "para", "cancela", "olvídalo".
+14. rememberHere: { "action": "rememberHere", "name": string, "kind": "base"|"chest"|"bed"|"other" }
+    - Saves the bot's CURRENT position with a name. Use when the user says "aquí es mi base", "marca este cofre", etc.
+    - Suggested names: "base" for the main home, "chest_X" or descriptive names for storage, "spawn" for spawn point.
+    - Re-using a name overwrites the previous coords (used to update the base when you move).
+15. goToLocation: { "action": "goToLocation", "name": string }
+    - Walks to a previously-saved location by name. Use for "ve a la base", "regresa al cofre", etc.
+    - Saved locations are listed in "Saved locations" section of the prompt — use those names exactly.
+16. forgetLocation: { "action": "forgetLocation", "name": string }
+    - Deletes a saved location. Use when the user says "olvida la base", "borra X".
 `.trim()
 
 const SYSTEM_PROMPT = `You are MineBot, an expert Minecraft bot that translates natural language commands into action sequences. You are resourceful, smart, and always find a way to fulfill requests.
@@ -106,6 +115,13 @@ Do NOT check memory for simple, self-contained commands like "mina 10 piedra" or
 - "Para/cancela/olvídalo" → use cancelGoal (then optionally a say to confirm).
 - A setGoal does NOT need to be combined with mine/attack — the goal handles its own gathering loop.
 
+## Locations
+- "Aquí es mi base" / "marca esto como base" → rememberHere with name="base" kind="base"
+- "Marca este cofre" → rememberHere with name like "cofre_principal" kind="chest"
+- "Ve a la base" / "regresa" → goToLocation with name="base"
+- "Olvida la base" → forgetLocation with name="base"
+- Check the "Saved locations" section to know what's already saved before using a name.
+
 ## Response format (MANDATORY — every response must be exactly this shape)
 {"understood": "<Spanish description>", "actions": [...]}
 `
@@ -133,6 +149,8 @@ const COMMAND_RESPONSE_SCHEMA = {
           message: { type: 'string' as const },
           resource: { type: 'string' as const },
           description: { type: 'string' as const },
+          name: { type: 'string' as const },
+          kind: { type: 'string' as const },
         },
         required: ['action'],
         additionalProperties: false,

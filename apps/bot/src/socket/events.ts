@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Server } from 'socket.io'
 import type { Bot } from 'mineflayer'
-import type { Vec3 } from 'vec3'
+import { Vec3 } from 'vec3'
 import type {
   ServerToClientEvents,
   ClientToServerEvents,
@@ -19,6 +19,7 @@ import { createGoalManager, type GoalManager } from '../bot/goals.js'
 import { startPlannerLoop, type PlannerLoopHandle } from '../bot/planner-loop.js'
 import { handleNaturalCommand } from '../bot/command-handler.js'
 import { setupChatListener, type ChatListenerHandle } from '../bot/chat-listener.js'
+import { getLocation, setLocation } from '../db/locations.js'
 
 type TypedIO = Server<ClientToServerEvents, ServerToClientEvents>
 
@@ -84,12 +85,17 @@ export function setupSocketBridge(
   let chatListener: ChatListenerHandle | null = null
 
   let isExecutingCommand = false
-  // Base location stays in memory for now — fase 2.5+ persists it as a "base"
-  // row in the locations table.
-  let baseLocation: Vec3 | null = null
   // Description of the currently-active goal, surfaced in BotStats.
   let currentGoal: string | null = null
   let lastEmittedState: BotState = 'idle'
+
+  // Read the bot's home base from the locations table. Returns null if no
+  // base has been set yet. Called every tick by tick.ts so keep it cheap —
+  // better-sqlite3 is sync and the row is keyed by name.
+  function getBaseLocation(): Vec3 | null {
+    const row = getLocation(getDb(), 'base')
+    return row ? new Vec3(row.x, row.y, row.z) : null
+  }
 
   const MAX_COMMAND_LENGTH = 500
   const COMMAND_COOLDOWN_MS = 3000
@@ -167,11 +173,21 @@ export function setupSocketBridge(
 
     currentBot = bot
 
-    // Memorize spawn point as initial base. Will be overridden once the goal
-    // planner (fase 3) explicitly sets one.
-    if (!baseLocation && bot.entity) {
-      baseLocation = bot.entity.position.clone()
-      console.log(`[Tick] Initial base set to spawn: ${baseLocation}`)
+    // Seed the base location from the spawn point if nothing's saved yet.
+    // Subsequent respawns won't overwrite a base set by the user.
+    if (bot.entity) {
+      const existing = getLocation(getDb(), 'base')
+      if (!existing) {
+        const pos = bot.entity.position
+        setLocation(getDb(), {
+          name: 'base',
+          kind: 'base',
+          x: Math.floor(pos.x),
+          y: Math.floor(pos.y),
+          z: Math.floor(pos.z),
+        })
+        console.log(`[Base] Seeded base from spawn at (${Math.floor(pos.x)}, ${Math.floor(pos.y)}, ${Math.floor(pos.z)})`)
+      }
     }
 
     io.emit('bot:status', 'connected')
@@ -230,7 +246,7 @@ export function setupSocketBridge(
 
     tickHandle = startTick(bot, {
       isExecutingCommand: () => isExecutingCommand,
-      getBase: () => baseLocation,
+      getBase: getBaseLocation,
       goalManager,
       log,
       onStateChange: (state) => {
@@ -246,7 +262,7 @@ export function setupSocketBridge(
       goalManager,
       log,
       getState: () => lastEmittedState,
-      getBase: () => baseLocation,
+      getBase: getBaseLocation,
       memoryDir: process.env.MEMORY_DIR ?? './data/memories',
     })
 
