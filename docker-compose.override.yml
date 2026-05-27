@@ -1,0 +1,12 @@
+# Override para deploy bare-metal (sin Dokploy).
+# Publica el container en 127.0.0.1:3011 para que Nginx (en el host) lo proxee
+# bajo https://kevin.victalejo.dev. Usa puerto 3011 porque 3001 está ocupado
+# por otra app (claude-code-manager).
+services:
+  minebot:
+    ports:
+      - "127.0.0.1:3011:3001"
+
+networks:
+  dokploy-network:
+    external: false

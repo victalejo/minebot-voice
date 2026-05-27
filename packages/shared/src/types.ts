@@ -105,6 +105,13 @@ export type BotAction =
   | { action: 'goToLocation'; name: string }
   // Forget a saved location.
   | { action: 'forgetLocation'; name: string }
+  // Place a single block at world coords. block is the inventory item name
+  // (e.g. "cobblestone", "oak_planks"). Best-effort — fails silently if the
+  // bot can't reach or has no reference block.
+  | { action: 'placeBlock'; block: string; x: number; y: number; z: number }
+  // Build a 3×3×3 cobblestone shelter centered at the bot's current position,
+  // with a 1-block door slot facing -X and a bed inside if available.
+  | { action: 'buildShelter' }
 
 // Socket.io typed events
 export interface ServerToClientEvents {

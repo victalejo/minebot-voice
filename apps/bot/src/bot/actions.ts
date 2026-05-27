@@ -1,10 +1,12 @@
 import type { Bot } from 'mineflayer'
+import { Vec3 } from 'vec3'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import type { BotAction } from '@minebot/shared'
 import pathfinderPkg from 'mineflayer-pathfinder'
 import type { GoalManager } from './goals.js'
 import * as schema from '../db/schema.js'
 import { setLocation, getLocation, deleteLocation } from '../db/locations.js'
+import { placeBlockAt, buildShelter } from './builder.js'
 
 const { goals } = pathfinderPkg
 const { GoalNear, GoalFollow, GoalY } = goals
@@ -235,6 +237,18 @@ export async function executeAction(
       }
       deleteLocation(ctx.db, action.name)
       log('action', `Forgot location "${action.name}"`)
+      break
+    }
+
+    case 'placeBlock': {
+      log('action', `Placing ${action.block} at (${action.x}, ${action.y}, ${action.z})`)
+      const res = await placeBlockAt(bot, action.block, new Vec3(action.x, action.y, action.z))
+      if (!res.ok) log('info', `Place failed: ${res.error}`)
+      break
+    }
+
+    case 'buildShelter': {
+      await buildShelter(bot, log)
       break
     }
 

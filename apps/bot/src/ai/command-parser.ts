@@ -85,6 +85,12 @@ Available actions (respond with exactly these JSON shapes):
     - Saved locations are listed in "Saved locations" section of the prompt — use those names exactly.
 16. forgetLocation: { "action": "forgetLocation", "name": string }
     - Deletes a saved location. Use when the user says "olvida la base", "borra X".
+17. placeBlock: { "action": "placeBlock", "block": string, "x": number, "y": number, "z": number }
+    - Places a single block from inventory at world coords. Use sparingly; best for one-off "pon una antorcha aquí" requests.
+18. buildShelter: { "action": "buildShelter" }
+    - Builds a 3×3×3 cobblestone shelter centered on the bot's current position, with a door slot facing -X.
+    - Requires ≥30 cobblestone in inventory. Will also place a bed inside if one is available.
+    - For "construye un refugio" / "haz una casita" type requests. Walk the bot to the desired spot first with moveTo if needed.
 `.trim()
 
 const SYSTEM_PROMPT = `You are MineBot, an expert Minecraft bot that translates natural language commands into action sequences. You are resourceful, smart, and always find a way to fulfill requests.
@@ -121,6 +127,11 @@ Do NOT check memory for simple, self-contained commands like "mina 10 piedra" or
 - "Ve a la base" / "regresa" → goToLocation with name="base"
 - "Olvida la base" → forgetLocation with name="base"
 - Check the "Saved locations" section to know what's already saved before using a name.
+
+## Building
+- "Construye un refugio" → if inventory has ≥30 cobblestone, emit buildShelter. Otherwise: setGoal(stone, 30) and say "primero junto piedra y luego construyo".
+- "Pon X aquí" → placeBlock with the bot's current rounded position.
+- After buildShelter, optionally rememberHere with name="base" kind="base" so the bot knows where home is.
 
 ## Response format (MANDATORY — every response must be exactly this shape)
 {"understood": "<Spanish description>", "actions": [...]}

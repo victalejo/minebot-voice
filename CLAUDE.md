@@ -66,6 +66,8 @@ Layer 6 — entry points (`bot/command-handler.ts` + `bot/chat-listener.ts`): bo
 
 Layer 7 — locations (`db/locations.ts`): named landmarks (`base`, `chest_*`, `bed`, `other`) persisted in the `locations` table. The base is auto-seeded from the bot's spawn position on first connection and never overwritten unless the user explicitly says so (via `rememberHere`). `tick.ts` and the planner read the base via `getLocation(db, 'base')` instead of an in-memory cache. The parser includes `formatLocationsForPrompt(db)` output in the prompt so the AI can navigate by name (`goToLocation`).
 
+Layer 8 — building (`bot/builder.ts`): `placeBlockAt(bot, item, target)` tries each of the 6 adjacent faces for a reference block; `buildShelter(bot, log)` builds a 3×3×3 cobblestone box with a 1-block door slot at -X, optionally placing a bed inside. Material check (≥30 cobble) up front; abort mid-build if HP<8 to avoid being stuck inside while dying. The AI is taught (in `SYSTEM_PROMPT`) to chain `setGoal(stone, 30)` → `buildShelter` when materials are missing.
+
 Plugins (`plugins.ts`): pathfinder, auto-eat (eats at food<14), pvp, collectblock, armor-manager. `entitiesToAvoid` includes creeper/tnt. These plugins handle several reactions transparently — the autonomy layer doesn't re-implement eating or armor-equipping.
 
 `socket/events.ts` orchestrates: spawn → wire bot listeners → create `GoalManager` → `startTick` → `startPlannerLoop`. A stats broadcast fires every 1s; state transitions also push an immediate stats update.
