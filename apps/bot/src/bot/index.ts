@@ -131,26 +131,63 @@ function attachLifecycleLogs(currentBot: Bot): void {
   currentBot.on('health', () => {
     const hp = currentBot.health
     if (hp < lastHp && currentBot.entity) {
-      // Bot just took damage. Mineflayer doesn't expose the attacker directly,
-      // so blame the nearest player — good enough for PvP. Larger radius (10
-      // blocks) catches sword reach + a bit of slack.
+      // Find the nearest player by scanning bot.entities (broader than
+      // bot.players — catches players whose .entity hasn't been wired into
+      // the players map yet). Any other player counts as the likely attacker.
       const myPos = currentBot.entity.position
       let nearestName: string | null = null
       let nearestDist = Infinity
-      for (const player of Object.values(currentBot.players)) {
-        const entity = player?.entity
-        if (!entity || entity === currentBot.entity) continue
-        const dist = myPos.distanceTo(entity.position)
-        if (dist < nearestDist && dist <= ATTACKER_DETECT_RADIUS) {
+      const playersSeen: string[] = []
+      for (const e of Object.values(currentBot.entities)) {
+        if (!e || e === currentBot.entity) continue
+        if (e.type !== 'player' || !e.username) continue
+        const dist = myPos.distanceTo(e.position)
+        playersSeen.push(`${e.username}@${dist.toFixed(1)}b`)
+        if (dist < nearestDist) {
           nearestDist = dist
-          nearestName = player.username
+          nearestName = e.username
         }
       }
-      console.log(`[Bot] HP ${lastHp.toFixed(1)} → ${hp.toFixed(1)}; ${nearestName ? `attacker=${nearestName} (${nearestDist.toFixed(1)}b)` : 'no nearby player'}`)
-      if (nearestName) markPlayerAttacker(nearestName)
-      // Wake the bot if it was sleeping so it can react.
-      if (currentBot.isSleeping) {
-        currentBot.wake().catch(() => { /* already awake */ })
+      console.log(`[Bot] HP ${lastHp.toFixed(1)} → ${hp.toFixed(1)}; players visible: [${playersSeen.join(', ') || 'none'}]`)
+      // Find the nearest player entity to fight back, even if positions are
+      // NaN (which happens when chunks aren't fully loaded).
+      let attackerEntity = null
+      let attackerName: string | null = null
+      for (const e of Object.values(currentBot.entities)) {
+        if (!e || e === currentBot.entity) continue
+        if (e.type !== 'player' || !e.username) continue
+        attackerEntity = e
+        attackerName = e.username
+        break // just take the first visible player — overwhelmingly likely the attacker
+      }
+
+      if (attackerName && attackerEntity) {
+        markPlayerAttacker(attackerName)
+        if (currentBot.isSleeping) {
+          currentBot.wake().catch(() => { /* already awake */ })
+        }
+
+        const pos = (attackerEntity as any).position
+        const posValid = pos && Number.isFinite(pos.x)
+        console.log(`[Bot]   → ATTACK ${attackerName} (pos valid: ${posValid})`)
+
+        // Try to look at the attacker so the server registers the swing.
+        // With NaN positions, lookAt would fail — so we guard.
+        if (posValid) {
+          try { currentBot.lookAt(pos.offset(0, 1.6, 0), true) } catch { /* swallow */ }
+        }
+        // Send 3 attack packets in quick succession. The server validates
+        // using its own server-side positions, so even with broken local
+        // entity tracking, the hits may register if we're in range.
+        for (let i = 0; i < 3; i++) {
+          setTimeout(() => {
+            try { currentBot.attack(attackerEntity) } catch { /* swallow */ }
+          }, i * 250)
+        }
+        // Engage pvp pursuit only when positions look usable.
+        if (posValid && Number.isFinite(currentBot.entity.position.x)) {
+          try { ((currentBot as any).pvp).attack(attackerEntity) } catch { /* swallow */ }
+        }
       }
     }
     lastHp = hp

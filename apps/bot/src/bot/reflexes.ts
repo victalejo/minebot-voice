@@ -130,7 +130,7 @@ function hasShelterAbove(bot: Bot): boolean {
 
 // Decision thresholds — exported so tick.ts and behaviors can reference them.
 export const REFLEX_THRESHOLDS = {
-  HP_FLEE: 6,       // below this, run away
-  HP_FIGHT_MIN: 8,  // need at least this to engage
-  HOSTILE_CLOSE: 8, // distance at which a hostile is "engaging" us
+  HP_FLEE: 5,       // below this, run away
+  HP_FIGHT_MIN: 6,  // need at least this to engage (no gap with HP_FLEE)
+  HOSTILE_CLOSE: 10, // distance at which a hostile is "engaging" us
 } as const
