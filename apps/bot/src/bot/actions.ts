@@ -87,14 +87,22 @@ export async function executeAction(
 
     case 'follow': {
       log('action', `Following player: ${action.player}`)
-      const entity = bot.players[action.player]?.entity
+      const playerObj = bot.players[action.player]
+      const entity = playerObj?.entity
+      const visibleNames = Object.keys(bot.players).join(', ') || '(none)'
+      console.log(`[Follow] target=${action.player} inPlayersList=${!!playerObj} hasEntity=${!!entity} visible=[${visibleNames}]`)
       if (!entity) {
+        const msg = playerObj
+          ? `${action.player}, no te veo desde aquí, acércate`
+          : `No conozco a ${action.player}, ¿está conectado?`
+        bot.chat(msg)
         log('info', `Player ${action.player} not found nearby`)
         break
       }
       const goal = new GoalFollow(entity, 3)
-      // GoalFollow is dynamic — setGoal with dynamic=true
       bot.pathfinder.setGoal(goal, true)
+      const goalSet = (bot.pathfinder as any).goal != null
+      console.log(`[Follow] setGoal called, pathfinder.goal set=${goalSet}`)
       log('info', `Now following ${action.player}`)
       break
     }

@@ -48,6 +48,8 @@ export interface BotContext {
   // Pre-formatted multi-line listing of saved locations ("- base (kind=base): x=... y=... z=...").
   // Empty string if none.
   knownLocations?: string
+  // Who issued the command. Lets actions like `follow` default to the speaker.
+  speaker?: string
 }
 
 export const ACTION_SCHEMA = `
@@ -183,6 +185,10 @@ export function buildPrompt(command: string, ctx: BotContext, historyContext?: s
 - Position: x=${ctx.position.x}, y=${ctx.position.y}, z=${ctx.position.z}
 - Time: ${timeStr}${ctx.isRaining ? ', lloviendo' : ''}
 - Inventory: ${inventoryStr}`
+
+  if (ctx.speaker) {
+    prompt += `\n\n## Speaker\nThe command was issued by player "${ctx.speaker}". When the speaker says "ven aquí", "sígueme", "ven conmigo", or similar, the target player is "${ctx.speaker}" — do not ask for their name.`
+  }
 
   if (ctx.knownLocations && ctx.knownLocations.length > 0) {
     prompt += `\n\n## Saved locations\n${ctx.knownLocations}`

@@ -60,6 +60,7 @@ export async function handleNaturalCommand(
     timeOfDay: bot.time.timeOfDay,
     isRaining: bot.isRaining,
     knownLocations: formatLocationsForPrompt(db),
+    speaker: speakerName,
   }
 
   try {

@@ -40,18 +40,22 @@ function decideState(
 
   const r = readReflexes(bot)
 
-  // Critical HP — flee
+  // Safety always wins — flee/defend BEFORE checking user pathfinder goal.
   if (r.hp <= REFLEX_THRESHOLDS.HP_FLEE && r.nearestHostile) {
     return { state: 'fleeing', reason: `HP ${r.hp} + hostile near` }
   }
-
-  // Hostile close enough to be engaging — defend
   if (
     r.nearestHostile &&
     r.hostileDistance <= REFLEX_THRESHOLDS.HOSTILE_CLOSE &&
     r.hp >= REFLEX_THRESHOLDS.HP_FIGHT_MIN
   ) {
     return { state: 'defending', reason: `hostile ${Math.round(r.hostileDistance)}b away` }
+  }
+
+  // User-initiated pathfinder goal (follow/moveTo) still active? Keep it.
+  // Without this, sleeping/returning_home would stomp on the user's intent.
+  if ((bot as any).pathfinder?.goal) {
+    return { state: 'executing_command', reason: 'user goal active' }
   }
 
   // Night + safe — try to sleep
@@ -145,10 +149,16 @@ function startBehaviorForState(
   const current = getCurrentBehavior()
   if (desired === current) return
 
-  // Stop the old one before launching new one.
-  stopCurrentBehavior(bot)
+  // Going to idle: don't disturb the bot if no behavior was tracked.
+  // User actions like follow/moveTo set pathfinder goals directly without
+  // registering a behavior — stopping pathfinder here would cancel them.
+  if (desired === null || desired === 'idle') {
+    if (current !== null) stopCurrentBehavior(bot)
+    return
+  }
 
-  if (desired === null || desired === 'idle') return
+  // Switching to a real behavior — stop whatever was happening first.
+  stopCurrentBehavior(bot)
 
   switch (desired) {
     case 'flee': {
