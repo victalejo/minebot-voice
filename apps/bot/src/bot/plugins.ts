@@ -24,8 +24,6 @@ export function loadPlugins(bot: Bot): void {
     movements.canDig = true
     movements.allowParkour = true
     movements.allowSprinting = true
-    movements.allowSwimming = true
-    movements.canOpenDoors = true
     movements.maxDropDown = 4
     movements.dontCreateFlow = true
     movements.dontMineUnderFallingBlock = true
@@ -34,13 +32,6 @@ export function loadPlugins(bot: Bot): void {
     movements.entitiesToAvoid.add('tnt')
 
     bot.pathfinder.setMovements(movements)
-
-    // Diagnostic: see what pathfinder is actually doing.
-    bot.on('path_update' as any, (r: any) => {
-      console.log(`[PF] path_update status=${r?.status} cost=${r?.cost} time=${r?.time}ms`)
-    })
-    bot.on('goal_reached' as any, () => console.log('[PF] goal_reached'))
-    bot.on('path_reset' as any, (reason: string) => console.log(`[PF] path_reset ${reason}`))
 
     bot.autoEat.opts = {
       priority: 'foodPoints',

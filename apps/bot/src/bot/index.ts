@@ -109,12 +109,11 @@ function attachLifecycleLogs(currentBot: Bot): void {
   })
 
   currentBot.on('spawn', () => {
-    console.log('[Bot] Spawned in world')
+    console.log(`[Bot] Spawned at ${posStr(currentBot)}`)
     const authPassword = process.env.MC_AUTH_PASSWORD
     if (authPassword) {
       setTimeout(() => sendAuthPassword(currentBot, authPassword), AUTH_LOGIN_DELAY_MS)
     }
-    setTimeout(() => applyResistanceEffect(currentBot), RESISTANCE_APPLY_DELAY_MS)
   })
 
   currentBot.on('death', () => {
@@ -156,6 +155,12 @@ function attachReconnectHandler(currentBot: Bot): void {
       lifecycleWirer?.(newBot)
     }, AUTO_RECONNECT_DELAY_MS)
   })
+}
+
+function posStr(currentBot: Bot): string {
+  const p = currentBot.entity?.position
+  if (!p) return 'unknown'
+  return `(${p.x.toFixed(1)},${p.y.toFixed(1)},${p.z.toFixed(1)})`
 }
 
 function sendAuthPassword(currentBot: Bot, password: string): void {

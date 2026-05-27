@@ -39,12 +39,16 @@ export function getCurrentBehavior(): BehaviorId {
 }
 
 // Stop whatever is running (pathfinder, pvp, sleep). Idempotent.
+// IMPORTANT: use setGoal(null) instead of pathfinder.stop() — stop() sets a
+// `stopPathing` flag that survives until the next physicsTick processes it,
+// and any setGoal called between then and the tick will trigger an internal
+// stop() that wipes the new goal. setGoal(null) clears state immediately.
 export function stopCurrentBehavior(bot: Bot): void {
   if (currentAbort) {
     currentAbort.abort()
     currentAbort = null
   }
-  try { bot.pathfinder?.stop() } catch { /* noop */ }
+  try { bot.pathfinder?.setGoal(null) } catch { /* noop */ }
   try { (bot as any).pvp?.stop() } catch { /* noop */ }
   currentBehavior = null
   userPathfinderActive = false

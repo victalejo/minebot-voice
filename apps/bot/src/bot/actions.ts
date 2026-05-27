@@ -90,8 +90,6 @@ export async function executeAction(
       log('action', `Following player: ${action.player}`)
       const playerObj = bot.players[action.player]
       const entity = playerObj?.entity
-      const visibleNames = Object.keys(bot.players).join(', ') || '(none)'
-      console.log(`[Follow] target=${action.player} inPlayersList=${!!playerObj} hasEntity=${!!entity} visible=[${visibleNames}]`)
       if (!entity) {
         const msg = playerObj
           ? `${action.player}, no te veo desde aquí, acércate`
@@ -103,7 +101,6 @@ export async function executeAction(
       const goal = new GoalFollow(entity, 3)
       bot.pathfinder.setGoal(goal, true)
       setUserPathfinder(true)
-      console.log(`[Follow] setGoal called for ${action.player}, isMoving=${bot.pathfinder.isMoving()}`)
       log('info', `Now following ${action.player}`)
       break
     }
@@ -165,8 +162,9 @@ export async function executeAction(
 
     case 'stop': {
       log('action', 'Stopping all activities')
-      bot.pathfinder.stop()
+      bot.pathfinder.setGoal(null)  // not .stop() — see behaviors.ts comment
       ;(bot as any).pvp.stop()
+      setUserPathfinder(false)
       log('info', 'Stopped')
       break
     }
