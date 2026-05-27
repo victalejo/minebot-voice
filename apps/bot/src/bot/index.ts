@@ -90,13 +90,13 @@ function cancelPendingReconnect(): void {
 }
 
 // Detach our reconnect handler first so an already-torn-down bot (e.g. mid-kick)
-// can't schedule a stale reconnect. Then attempt quit defensively.
+// can't schedule a stale reconnect. Then strip *every* listener so the old bot
+// (and its chunk maps, entity tables, prismarine-physics state) can be GC'd.
+// Without this each reconnect leaked ~250MB and the process OOM'd after a few
+// timeout cycles.
 function replaceExistingBot(oldBot: Bot): void {
-  try {
-    oldBot.removeAllListeners('end')
-  } catch {
-    // EventEmitter methods shouldn't throw, but be defensive.
-  }
+  try { oldBot.removeAllListeners() } catch { /* swallow */ }
+  try { (oldBot as any)._client?.removeAllListeners?.() } catch { /* swallow */ }
   safeQuit(oldBot)
 }
 
@@ -231,6 +231,15 @@ function attachReconnectHandler(currentBot: Bot): void {
   currentBot.on('end', (reason) => {
     console.log(`[Bot] Disconnected: ${reason}`)
     bot = null
+
+    // CRITICAL for memory: tear down every listener and the underlying client
+    // immediately. Without this the old bot (and its chunk/entity/physics
+    // state) stayed in memory until the next replaceExistingBot, leaking
+    // ~250MB per cycle and OOMing the process after a few timeouts.
+    setTimeout(() => {
+      try { currentBot.removeAllListeners() } catch { /* swallow */ }
+      try { (currentBot as any)._client?.removeAllListeners?.() } catch { /* swallow */ }
+    }, 0)
 
     if (manualDisconnect) {
       console.log('[Bot] Manual disconnect — skipping auto-reconnect')
