@@ -80,11 +80,12 @@ function decideState(
     }
   }
 
-  // Have a base and far from it (>80 blocks) — go home
+  // Have a base and moderately far from it (80-200 blocks) — go home.
+  // Beyond 200 the path computation explodes memory, so just stay put.
   const base = ctx.getBase()
   if (base) {
     const dist = bot.entity.position.distanceTo(base)
-    if (dist > 80) {
+    if (dist > 80 && dist <= 200) {
       return { state: 'returning_home', reason: `${Math.round(dist)}b from base` }
     }
   }

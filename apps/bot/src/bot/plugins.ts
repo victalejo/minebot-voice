@@ -33,6 +33,11 @@ export function loadPlugins(bot: Bot): void {
 
     bot.pathfinder.setMovements(movements)
 
+    // Bound pathfinder so it can't explode memory on impossible routes (e.g.
+    // returning_home to a base 400 blocks away across loaded chunks).
+    ;(bot.pathfinder as any).thinkTimeout = 3000  // give up after 3s
+    ;(bot.pathfinder as any).searchRadius = 100   // only consider nodes within 100b
+
     bot.autoEat.opts = {
       priority: 'foodPoints',
       minHunger: 14,

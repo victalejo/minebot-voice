@@ -19,7 +19,7 @@ import { createGoalManager, type GoalManager } from '../bot/goals.js'
 import { startPlannerLoop, type PlannerLoopHandle } from '../bot/planner-loop.js'
 import { handleNaturalCommand } from '../bot/command-handler.js'
 import { setupChatListener, type ChatListenerHandle } from '../bot/chat-listener.js'
-import { getLocation, setLocation } from '../db/locations.js'
+import { getLocation } from '../db/locations.js'
 
 type TypedIO = Server<ClientToServerEvents, ServerToClientEvents>
 
@@ -173,22 +173,11 @@ export function setupSocketBridge(
 
     currentBot = bot
 
-    // Seed the base location from the spawn point if nothing's saved yet.
-    // Subsequent respawns won't overwrite a base set by the user.
-    if (bot.entity) {
-      const existing = getLocation(getDb(), 'base')
-      if (!existing) {
-        const pos = bot.entity.position
-        setLocation(getDb(), {
-          name: 'base',
-          kind: 'base',
-          x: Math.floor(pos.x),
-          y: Math.floor(pos.y),
-          z: Math.floor(pos.z),
-        })
-        console.log(`[Base] Seeded base from spawn at (${Math.floor(pos.x)}, ${Math.floor(pos.y)}, ${Math.floor(pos.z)})`)
-      }
-    }
+    // Note: no auto-seeding of "base" anymore. The server spawn point is
+    // usually far from where the user actually wants the bot to operate,
+    // which made the autonomous returning_home behavior try to pathfind
+    // hundreds of blocks across loaded chunks and OOM the process. The user
+    // sets the base explicitly via the in-game "marca esto como base" command.
 
     io.emit('bot:status', 'connected')
     io.emit('bot:inventory', getInventoryItems(bot))
