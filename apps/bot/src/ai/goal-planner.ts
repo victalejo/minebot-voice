@@ -9,15 +9,16 @@ import type { GatherResource } from '@minebot/shared'
 const AI_PROVIDER = process.env.AI_PROVIDER ?? 'anthropic'
 
 // Planner-specific overrides (default to parser model if not set).
-const PLANNER_MODEL = process.env.PLANNER_MODEL ?? (
+// Use || not ?? so empty-string env vars (from docker-compose default expansion) also fall through.
+const PLANNER_MODEL = process.env.PLANNER_MODEL || (
   AI_PROVIDER === 'openai'
-    ? (process.env.AI_MODEL ?? 'deepseek-v4-pro')
-    : (process.env.AI_MODEL ?? 'claude-sonnet-4-20250514')
+    ? (process.env.AI_MODEL || 'deepseek-v4-pro')
+    : (process.env.AI_MODEL || 'claude-sonnet-4-20250514')
 )
-const PLANNER_THINKING = (process.env.PLANNER_THINKING ?? process.env.OPENAI_THINKING) as
+const PLANNER_THINKING = (process.env.PLANNER_THINKING || process.env.OPENAI_THINKING || undefined) as
   | 'enabled' | 'disabled' | undefined
 const PLANNER_REASONING_EFFORT = (
-  process.env.PLANNER_REASONING_EFFORT ?? process.env.OPENAI_REASONING_EFFORT
+  process.env.PLANNER_REASONING_EFFORT || process.env.OPENAI_REASONING_EFFORT || undefined
 ) as 'low' | 'medium' | 'high' | 'max' | undefined
 
 const anthropic = AI_PROVIDER === 'anthropic' ? new Anthropic() : null

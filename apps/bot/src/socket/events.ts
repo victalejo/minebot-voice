@@ -267,7 +267,7 @@ export function setupSocketBridge(
     })
 
     // ── In-game chat listener ("Juan, consigue madera") ────────────
-    const botName = process.env.BOT_NAME ?? bot.username
+    const botName = process.env.BOT_NAME || bot.username
     chatListener = setupChatListener(bot, {
       io,
       bot,
